@@ -1,0 +1,1397 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:activiti="http://activiti.org/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:omgdc="http://www.omg.org/spec/DD/20100524/DC" xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI" typeLanguage="http://www.w3.org/2001/XMLSchema" expressionLanguage="http://www.w3.org/1999/XPath" targetNamespace="http://www.collibra.com/apiv2">
+  <collaboration id="Collaboration">
+    <participant id="pool1" name="Service Now" processRef="serviceNowIntegration"></participant>
+  </collaboration>
+  <process id="serviceNowIntegration" name="Service Now Integration" isExecutable="true">
+    <laneSet id="laneSet_serviceNowIntegration">
+      <lane id="lane1">
+        <flowNodeRef>startevent1</flowNodeRef>
+        <flowNodeRef>scripttask6</flowNodeRef>
+        <flowNodeRef>exclusivegateway3</flowNodeRef>
+        <flowNodeRef>endevent2</flowNodeRef>
+        <flowNodeRef>scripttask7</flowNodeRef>
+        <flowNodeRef>mailtask2</flowNodeRef>
+        <flowNodeRef>endevent3</flowNodeRef>
+        <flowNodeRef>scripttask8</flowNodeRef>
+        <flowNodeRef>usertask2</flowNodeRef>
+        <flowNodeRef>scripttask9</flowNodeRef>
+        <flowNodeRef>usertask3</flowNodeRef>
+      </lane>
+    </laneSet>
+    <startEvent id="startevent1" name="Start" activiti:initiator="startUser">
+      <extensionElements>
+        <activiti:formProperty id="sendVotingActionEmails" name="Send an action email to users that are required to approve data usage" type="boolean" default="true" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="voteWarningTimeDuration" name="Please enter time duration before a voting reminder is send" type="string" default="B5D" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="voteTimeoutDuration" name="Timeout before voting process is forced to continue" type="string" default="P1M" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="voteCompletionPercentage" name="Percentage required to vote before completion" type="long" default="100" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="serviceNowNumberAttrTypeId" name="serviceNowNumberAttrTypeId" type="string" default="39d97752-dec0-46f1-bd37-42fff5a53f34" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="serviceNowStatusAttrTypeId" name="serviceNowStatusAttrTypeId" type="string" default="57fa4cd1-8538-435d-bffd-7647928496f5" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="serviceNowUserName" name="serviceNowUserName" type="string" default="Murali" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="restEndApiUrl" name="restEndApiUrl" type="string" default="http://51.158.190.254:7070" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="urgencyAttrTypeId" name="urgencyAttrTypeId" type="string" default="8b6ef190-48cb-44a0-8920-d9b579cac797" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="impactAttrTypeId" name="impactAttrTypeId" type="string" default="e2aab318-1fc6-43ac-aa09-7d924230becc" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="descritionAttrtypeId" name="descritionAttrtypeId" type="string" default="00000000-0000-0000-0000-000000003114" readable="false" required="true"></activiti:formProperty>
+      </extensionElements>
+    </startEvent>
+    <scriptTask id="scripttask6" name="Triggering rest url for service now" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+
+
+import groovy.json.JsonOutput;
+import groovy.json.JsonBuilder
+
+loggerApi.info("Checkout || Service Now Integration Starts")
+
+def dataUsageAssetId = item.id
+def dataUsageId =item.id.toString()
+loggerApi.info("dataUsageId==>"+dataUsageId)
+def dataUsageAssetURL = applicationApi.getInfo().getBaseUrl()+'asset/'+uuid2String(item.id)
+
+def urgencyRequestReasonval = urgencyRequestReason
+loggerApi.info("urgencyRequestReasonval==>"+urgencyRequestReasonval.getClass())
+loggerApi.info("urgencyRequestReason==>"+urgencyRequestReason.getClass())
+
+def urgecnyAtr = attributeUpsert(dataUsageAssetId, urgencyRequestReason ,urgencyAttrTypeId)
+def urgencyValues = urgecnyAtr.getValue()
+loggerApi.info("urgecnyAtr==>"+urgecnyAtr)
+
+def impactAtr = attributeUpsert(dataUsageAssetId, impactRequestReason, impactAttrTypeId)
+loggerApi.info("impactAtr==>"+impactAtr)
+
+
+def descriptionAtr = attributeUpsert(dataUsageAssetId,description ,descritionAttrtypeId)
+loggerApi.info("descriptionAtr==>"+descriptionAtr)
+
+
+
+def selectImpactSplit = impactRequestReason.split(" - ")[0]
+def selectUrgencySplit = urgencyRequestReason.split(" - ")[0]
+/******** Get DataUsage Asset Id ********/
+
+
+def json = new JsonBuilder()
+def root = json "dataUsageId": dataUsageId ,"description":description ,"dataElement":dataElement ,"callerName": serviceNowUserName ,"requesterNames" : requesterName ,"requesterMailID" : requesterMail, "dataUsageURL" : dataUsageAssetURL, "impactValue" : selectImpactSplit, "urgencyValue" : selectUrgencySplit
+loggerApi.info("json.toString()==>"+json.toString())
+def jsonOP = JsonOutput.toJson(root)
+
+/******** Trigger Rest URL to Integrate serviceNow ********/
+def post = new URL(restEndApiUrl+"/createIncident").openConnection();
+loggerApi.info("post===>"+post)
+def message = '{"message":"this is a message"}'
+post.setRequestMethod("POST")
+post.setDoOutput(true)
+post.setRequestProperty("Content-Type", "application/json")
+loggerApi.info("authorization ok==>")
+
+def httpRequestBodyWriter = new BufferedWriter(new OutputStreamWriter(post.getOutputStream()))
+loggerApi.info("httpRequestBodyWriter====>"+httpRequestBodyWriter)
+httpRequestBodyWriter.write(jsonOP)
+httpRequestBodyWriter.close()
+
+/******** Check for Response Code ********/
+def postRC = post.getResponseCode();
+loggerApi.info("PostRc==>"+postRC)
+
+if(postRC.equals(200)) {
+requestBodyFromResponse = post.getInputStream().getText()
+loggerApi.info("requestBodyFromResponse===>"+post.getInputStream())
+def requestBodyFromResponseSplit= requestBodyFromResponse.split(",")
+loggerApi.info("requestBodyFromResponseSplit====>"+requestBodyFromResponseSplit)
+def dataUsageIdFromResponse= string2Uuid(requestBodyFromResponseSplit[0])
+addAttribute(dataUsageIdFromResponse, string2Uuid(serviceNowNumberAttrTypeId), requestBodyFromResponseSplit[1])
+addAttribute(dataUsageIdFromResponse, string2Uuid(serviceNowStatusAttrTypeId), requestBodyFromResponseSplit[2])
+}
+execution.setVariable("postRC",postRC)
+execution.setVariable("requestBodyFromResponse",requestBodyFromResponse)
+loggerApi.info("Rest Api Call Flow End")
+
+execution.setVariable("postRC",postRC)
+loggerApi.info("Rest Api Call Flow End")
+loggerApi.info("Checkout || Service Now Integration Ends")
+
+
+]]></script>
+    </scriptTask>
+    <exclusiveGateway id="exclusivegateway3" name="Exclusive Gateway"></exclusiveGateway>
+    <sequenceFlow id="flow14" sourceRef="scripttask6" targetRef="exclusivegateway3"></sequenceFlow>
+    <endEvent id="endevent2" name="End"></endEvent>
+    <sequenceFlow id="flow15" name="!200" sourceRef="exclusivegateway3" targetRef="endevent2">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${postRC!=200}]]></conditionExpression>
+    </sequenceFlow>
+    <scriptTask id="scripttask7" name="Get updated service now attribute values of data usage" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[import com.collibra.dgc.core.api.component.instance.AttributeApi
+import com.collibra.dgc.core.api.dto.PagedResponse
+import com.collibra.dgc.core.api.dto.instance.attribute.FindAttributesRequest
+import com.collibra.dgc.core.model.attribute.Attribute
+
+//Reusable code starts
+def findAttributes(assetId, typeIds) {
+
+	List<Attribute> attributes = new ArrayList<Attribute>();
+	FindAttributesRequest.Builder builder = new FindAttributesRequest().builder();
+	Boolean moreToProcess  = true;
+	int offset = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Attribute> response  = attributeApi.findAttributes(builder.assetId(assetId).typeIds(typeIds).build());
+		attributes.addAll(response.getResults());
+		if(attributes.size()==response.total){
+			moreToProcess = false;
+		}
+		else {
+			offset = attributes.size();
+		}
+	}
+	return attributes;
+}//Reusable code ends
+
+def serviceNowStatus
+def serviceNowNumber
+
+def dataUsageAssetName = assetApi.getAsset(item.id).getName()
+
+//Get service now number and service now status attribute values of data usage for notifying consumer about service-now status
+def finddataUsageAttr = findAttributes(item.id, [string2Uuid(serviceNowNumberAttrTypeId)])
+if(!finddataUsageAttr.isEmpty()) {
+	serviceNowNumber= finddataUsageAttr.get(0).getValue()
+}
+
+def serviceNowStatusAttr = findAttributes(item.id, [string2Uuid(serviceNowStatusAttrTypeId)])
+if(!serviceNowStatusAttr.isEmpty()) {
+	serviceNowStatus= serviceNowStatusAttr.get(0).getValue()
+}
+
+def dataUsageAssetURL = applicationApi.getInfo().getBaseUrl()+'asset/'+uuid2String(item.id)
+
+//Email content and subject for notification
+emailTextContent = "ServiceNow integration of <a href="+dataUsageAssetURL+">"+dataUsageAssetName+"</a> is successfully done with status - "+serviceNowStatus
+
+emailTextSubjectLine = dataUsageAssetName+' || '+serviceNowNumber+' - '+serviceNowStatus
+
+execution.setVariable("emailText",emailTextContent)
+execution.setVariable("emailTextSubject",emailTextSubjectLine)
+execution.setVariable("dataUsageAssetURL",dataUsageAssetURL)]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow17" name="post rc 200" sourceRef="exclusivegateway3" targetRef="usertask2">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${postRC==200}]]></conditionExpression>
+    </sequenceFlow>
+    <serviceTask id="mailtask2" name="Service Now Status Updated Mail" activiti:type="mail">
+      <extensionElements>
+        <activiti:field name="html">
+          <activiti:expression><![CDATA[<html>
+<a href =${execution.getVariable("dashboardLink")}>
+<img style ="margin:10px0px -20px25px" border= "0" height= "68" width= "215" src=${execution.getVariable("logoLink")}alt ="DataBook Notification"></a>
+<table style ="background-color:#004AE4;color:white;font-size:13px;padding:0px 25px;font-weight:bold;Lucida Grande;"width= "100%">
+<tbody><tr> <td align="left"> DataBook Notifications> </td><td align ="right">${execution.getVariable("todayDate")}</td></tr></tbody></table><br>
+<div style="font-family:Calibri;">
+<table style="margin-left:25px;">
+<tr><td align="left">${execution.getVariable("emailText")}</td></tr>
+</table><br></div>
+<br><br>
+<div align="left" style="text-align:center;padding:10px;font-size:10px;color=#c3c3c3">This message is Automatically Generated the Databook FirmWide Business Glossary </div></html>]]></activiti:expression>
+        </activiti:field>
+        <activiti:field name="to">
+          <activiti:expression><![CDATA[${execution.getVariable("requesterMail")}]]></activiti:expression>
+        </activiti:field>
+        <activiti:field name="subject">
+          <activiti:expression><![CDATA[${execution.getVariable("emailTextSubject")}]]></activiti:expression>
+        </activiti:field>
+        <activiti:field name="from">
+          <activiti:string><![CDATA[no-reply@collibra.com]]></activiti:string>
+        </activiti:field>
+      </extensionElements>
+    </serviceTask>
+    <sequenceFlow id="flow18" sourceRef="usertask2" targetRef="scripttask7"></sequenceFlow>
+    <endEvent id="endevent3" name="End"></endEvent>
+    <sequenceFlow id="flow19" sourceRef="mailtask2" targetRef="endevent3"></sequenceFlow>
+    <scriptTask id="scripttask8" name="ReUsable Functions" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+import com.collibra.dgc.core.api.dto.instance.community.AddCommunityRequest
+import com.collibra.dgc.core.api.dto.instance.community.ChangeCommunityRequest
+import com.collibra.dgc.core.api.dto.instance.community.FindCommunitiesRequest
+import com.collibra.dgc.core.api.component.instance.DomainApi
+import com.collibra.dgc.core.api.dto.instance.domain.FindDomainsRequest
+import com.collibra.dgc.core.api.dto.instance.asset.AddAssetRequest
+import com.collibra.dgc.core.api.dto.instance.asset.ChangeAssetRequest
+import com.collibra.dgc.core.api.dto.instance.attribute.AddAttributeRequest
+import com.collibra.dgc.core.api.dto.instance.attribute.FindAttributesRequest
+import com.collibra.dgc.core.api.dto.instance.comment.AddCommentRequest
+import com.collibra.dgc.core.api.dto.instance.attribute.ChangeAttributeRequest
+import com.collibra.dgc.core.api.dto.instance.relation.AddRelationRequest
+import com.collibra.dgc.core.api.dto.instance.responsibility.AddResponsibilityRequest
+import com.collibra.dgc.core.api.model.ResourceType
+import com.collibra.dgc.core.api.model.instance.Asset
+import com.collibra.dgc.core.api.model.instance.Community
+import com.collibra.dgc.core.api.model.instance.Domain
+import com.collibra.dgc.core.api.model.instance.Relation
+import com.collibra.dgc.core.api.model.instance.attribute.Attribute
+import com.collibra.dgc.core.api.model.user.User
+import com.collibra.dgc.core.api.dto.instance.responsibility.FindResponsibilitiesRequest
+import com.collibra.dgc.core.api.dto.instance.relation.FindRelationsRequest
+import com.collibra.dgc.core.api.component.application.ApplicationApi
+import com.collibra.dgc.core.api.dto.instance.asset.FindAssetsRequest
+import com.collibra.dgc.core.api.component.instance.AssetApi
+import com.collibra.dgc.core.api.component.instance.AttributeApi
+import com.collibra.dgc.core.api.component.instance.CommunityApi
+import com.collibra.dgc.core.api.component.instance.ResponsibilityApi
+import com.collibra.dgc.core.api.component.role.RoleApi
+import com.collibra.dgc.core.api.dto.role.FindRolesRequest
+import com.collibra.dgc.core.api.dto.user.FindUsersRequest
+import com.collibra.dgc.core.api.dto.MatchMode
+import com.collibra.dgc.core.api.dto.PagedResponse
+import com.collibra.dgc.core.api.dto.instance.domain.AddDomainRequest
+import com.collibra.dgc.core.api.dto.instance.domain.ChangeDomainRequest
+import com.collibra.dgc.core.api.dto.instance.asset.RemoveAssetTagsRequest
+import com.collibra.dgc.core.api.dto.instance.asset.SetAssetAttributesRequest
+import com.collibra.dgc.core.api.dto.instance.asset.SetAssetRelationsRequest
+import com.collibra.dgc.core.api.dto.instance.asset.SetAssetResponsibilitiesRequest
+import com.collibra.dgc.core.api.dto.instance.asset.SetAssetTagsRequest
+import com.collibra.dgc.core.api.component.viewpermission.ViewPermissionApi
+import com.collibra.dgc.core.api.dto.viewpermission.AddViewPermissionRequest
+import com.collibra.dgc.core.api.dto.viewpermission.FindViewPermissionRequest
+import com.collibra.dgc.core.api.model.reference.ResourceReference
+import com.collibra.dgc.core.api.component.workflow.WorkflowDefinitionApi
+import com.collibra.dgc.core.api.dto.workflow.FindWorkflowTasksRequest
+import com.collibra.dgc.core.api.dto.workflow.StartWorkflowInstancesRequest
+import java.text.SimpleDateFormat
+import java.util.Date
+
+
+/*-------------------------------------Reusable methods by DATANOMIST -----------------------------------------*/
+
+
+
+/**-----COMMUNITIES - All Reusable functions start here-----**/
+
+/**
+ * DNRF - 00001
+ * findCommunitiesByName
+ * In Builder passing parameters are below (For more info, Check API V2 documentation -> Community API)
+ * @param name 	          -> Name of the Community(optional)
+ * @param nameMatchMode   -> MatchMode(Mandatory when name is given)
+ * @param parentId        -> UUID of parent(optional, if no parent id then provide null)
+ * If all @params are not provided, this function will get all the communities  in Databook. (Not Recommended)
+ */
+
+def findCommunitiesByName(name, nameMatchMode, parentId) {
+
+	List<Community> communities = new ArrayList<Community>();
+	FindCommunitiesRequest.Builder   builder         = new FindCommunitiesRequest().builder();
+	Boolean moreToProcess                               = true;
+	int offset                                          = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Community> response  = communityApi.findCommunities(builder.name(name).nameMatchMode(nameMatchMode).parentId(parentId).build());
+		communities.addAll(response.getResults());
+		if(communities.size()==response.total){
+			moreToProcess = false;
+		}
+		else {
+			offset = communities.size();
+		}
+	}
+	return communities;
+}
+
+//Method name:findCommunitiesInBulk(name, nameMatchMode, parentId)
+/*
+ def findingCommunitiesWithParentId = 	findCommunitiesInBulk( communityName.toString(), MatchMode.ANYWHERE, string2Uuid(parentCommunityId))
+ loggerApi.info("findingCommunities with Parent Id ========>"+findingCommunitiesWithParentId)
+ */
+
+
+
+/**
+ * DNRF - 00002
+ * addCommunity
+ * In Builder passing parameters are below (For more info, Check API V2 documentation -> Community API)
+ * @param name 	          -> Name of the new Community (Mandatory)
+ * @param description	  -> The description of the new community.(Optional)
+ * @param parentId        -> UUID of parent (Optional. If new community itself is a parent)
+ */
+
+def addCommunity(name,description,parentId) {
+	return communityApi.addCommunity(AddCommunityRequest.builder()
+			.description(description)
+			.name(name)
+			.parentId(parentId)
+			.build()
+			)
+}
+
+
+/**
+ * DNRF - 00003
+ * Changing Communities with passing parameters are name , id , parentId
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Community API)
+ * @Param communityId        -> UUID of the changing community    (Mandatory)
+ * @Param communityName 	 -> New Name of the changing community( Optional)
+ * @Param parentCommunityId	 -> New UUID of the parent community(optional)
+ */
+def changeCommunity(communityName,communityId,parentCommunityId) {
+	return communityApi.changeCommunity(ChangeCommunityRequest.builder()
+			.name(communityName)
+			.id(communityId)
+			.parentId(parentCommunityId)
+			.build()
+			)
+}
+
+//Method Name: changeCommunity(communityName,communityId,parentCommunityId)
+
+/*
+ def changedCommunity = changeCommunity(changeCommunityName,string2Uuid(changeCommunityId),string2Uuid(changeCommunityParentCommunityId))
+ loggerApi.info('changedCommunityName	->'+changedCommunity)
+ */
+
+/**COMMUNITIES - All Reusable functions ends here**/
+
+
+
+/**DOMAINS - All Reusable functions start here**/
+
+
+/**
+ * DNRF - 00004
+ * Finding Domain with passing parameters are name, nameMatchMode, typeId, communityId
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Domain API)
+ * @Param domainName 	-> Name of the Finding Domain( Optional)
+ * @Param nameMatchMode -> Match Mode Type(Mandatory when name is given)
+ * @Param domainTypeId  -> UUID of the Domain Type(Optional)
+ * @Param communityId 	-> UUID of Community(Optional)
+ * If all @params are not provided, this function will get all the domains in Databook. (Not Recommended)
+ */
+
+def findDomains(domainName, nameMatchMode, domainTypeId, communityId) {
+
+	List<Domain> domains = new ArrayList<Domain>();
+	FindDomainsRequest.Builder   builder         = new FindDomainsRequest().builder();
+	Boolean moreToProcess                               = true;
+	int offset                                          = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Asset> response  = domainApi.findDomains(builder.name(domainName).nameMatchMode(nameMatchMode).typeId(domainTypeId).communityId(communityId).build());
+		domains.addAll(response.getResults());
+		if(domains.size()==response.total){
+			moreToProcess = false;
+		}
+		else
+		{
+			offset = domains.size();
+		}
+	}
+	return domains;
+}
+//Method Name: findDomain(domainName, nameMatchMode, domainTypeId, communityId)
+
+//def typeIds = []
+//typeIds.add(string2Uuid(assetType))
+/*
+ def findingDomainsByNameAndTypeInCommunity = 	findDomain( domainName1, MatchMode.ANYWHERE, string2Uuid(domainTypeID), string2Uuid(communityID))
+ loggerApi.info("findingDomainsByNameAndTypeInCommunity ========>"+findingDomainsByNameAndTypeInCommunity)
+ */
+
+
+/**
+ * DNRF - 00005
+ * Adding Domain
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Domain API)
+ * @Param domainName	-> Name of Domain  (Mandatory)
+ * @Param domainTypeId 	-> UUID of DomainType (Mandatory)
+ * @Param communityId 	-> UUID of Community  (Mandatory)
+ * @Param description   -> Description of the domain(optional)
+ */
+def addDomain(domainName, domainTypeId, communityId, description) {
+	return domainApi.addDomain(
+			AddDomainRequest.builder()
+			.name(domainName)
+			.typeId(domainTypeId)
+			.communityId(communityId)
+			.description(description)
+			.build()
+			)
+}
+//Method Name:  addDomain(domainName, domainTypeId, communityId, description)
+
+/*
+ def addingDomain = addDomain(domainName1, string2Uuid(domainTypeID), string2Uuid(communityID), desc)
+ loggerApi.info("addingDomain ========>"+addingDomain)
+ */
+
+
+/**
+ * DNRF - 00006
+ * Changing Domain
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Domain API)
+ * @Param id	        -> UUID of the domain to be changed (Mandatory)
+ * @Param domainName	-> Name of the Domain(Optional)
+ * @Param typeId 	    -> UUID of the new domain type (Optional)
+ * @Param communityId 	-> UUID of Community(Optional)
+ */
+def changeDomain(id,domainName,domainTypeId,communityId) {
+	return domainApi.changeDomain(ChangeDomainRequest.builder()
+			.id(id)
+			.name(domainName)
+			.typeId(domainTypeId)
+			.communityId(communityId)
+			.build()
+			)
+}
+//Method Name: changeDomain(id,domainName,domainTypeId,communityId)
+
+/*
+ def changingDomain  = changeDomain(string2Uuid(domainID),domainName1,string2Uuid(domainTypeID),string2Uuid(communityID))
+ loggerApi.info("changingDomain ========>"+changingDomain)
+ */
+
+
+
+/**
+ * DNRF - 00007
+ * Getting asset Info By Asset Id
+ * @param -> UUID of Asset
+ * @response ->  single  asset impl (.getTypeId() , .getType().getName(), .getDomainId() , .getDomain().getName(), .getDisplayName(), .getName(), .getStatusId(), .getStatus().getName())
+ */
+def getAssetInfo(assetId)
+{
+	return assetApi.getAsset(assetId)
+}
+/*
+ * def getAssetInfo(assetId) { return
+ * assetApi.getAsset(assetId) }
+ */
+//Method Name: getAssetInfo(assetId)
+
+/*def gettingAsset  = getAssetInfo(string2Uuid(assetID))
+ loggerApi.info("gettingAsset ========>"+gettingAsset)
+ */
+
+/**Domain - All Reusable functions ends here**/
+
+
+
+/**------ASSET - All Reusable functions start here------**/
+
+/**
+ * DNRF - 00008
+ * findAssets
+ * In Builder passing parameters are below (For more info, Check API V2 documentation -> Attribute API)
+ * @param name       -> Name of the asset to search for (Optional)
+ * @param matchMode  -> Match mode used to compare name (Mandatory when name is given)
+ * @param typeIds	 -> UUID(s) of the asset type(s) in <List>(s) (optional)
+ * @param domainId   -> UUID of Domain(optional)
+ * @param statusIds  -> UUID(s) of the status(es) (optional)
+ * @param communityId ->UUID of Community(Optional)
+ * If all @params are not provided, this function will get all the assets in Databook. (Not Recommended)
+ */
+def findAssets(name, matchMode,statusIds,typeIds, domainId,communityId) {
+
+	List<Asset> assets = new ArrayList<Asset>();
+	FindAssetsRequest.Builder   builder         = new FindAssetsRequest().builder();
+	Boolean moreToProcess                               = true;
+	int offset                                          = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Asset> response  = assetApi.findAssets(builder.name(name).nameMatchMode(matchMode).typeIds(typeIds).domainId(domainId).statusIds(statusIds).communityId(communityId).build());
+		assets.addAll(response.getResults());
+		if(assets.size()==response.total){
+			moreToProcess = false;
+		}
+		else
+		{
+			offset = assets.size();
+		}
+	}
+	return assets;
+}
+//Method Name:  findAssets(name, matchMode,statusIds,typeIds, domainId,communityId)
+
+/*
+ statusList=[]
+ def findingAssets = findAssets( name, MatchMode.Exact,statusList, [string2Uuid(assetType)], string2Uuid(domId),null)
+ loggerApi.info("findingAssets ========>"+findingAssets)
+ */
+
+/**
+ * DNRF - 00009
+ * Changing ASSET with passing parameters id, name, domainId, typeId, displayName, statusId
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param id          -> Asset Type Id of the asset to be changed (Mandatory)
+ * @param name        -> Name of the Asset(Optional)
+ * @param domainId    -> Id of domain where asset has to move(Optional)
+ * @param typeId      -> UUID of the new asset type (Optional)
+ * @param statusId    -> UID of the status(Optional)
+ * @param displayName -> Display name of the new asset(Optional)
+ */
+
+def changeAsset(id,name,domainId,typeId,statusId,displayName) {
+	return assetApi.changeAsset(ChangeAssetRequest.builder()
+			.id(id)
+			.name(name)
+			.displayName(displayName)
+			.typeId(typeId)
+			.domainId(domainId)
+			.statusId(statusId)
+			.build()
+			)
+}
+// Method Name : changeAsset(id,name,domainId,typeId,statusId,displayName)
+
+/*def changingAsset = changeAsset(id,name,domainId,typeId,statusId,displayName)
+ loggerApi.info("changingAsset ============>"+changingAsset)
+ */
+
+
+/**
+ * DNRF - 00010
+ * Adding ASSET with passing parameters name, typeId, domainId, displayNmae, status
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param name        -> Name of the Asset (Mandatory)
+ * @param displayName -> Display name of the new asset(Mandatory)
+ * @param typeId      -> Asset Type Id to which this asset is instance of (Mandatory)
+ * @param statusId    -> The ID of the status (Optional)
+ * @param domainId    -> Id of domain where asset has to created (Mandatory)
+ */
+def addAsset(name,displayName,typeId,status,domainId) {
+	return assetApi.addAsset(AddAssetRequest.builder()
+			.name(name)
+			.typeId(typeId)
+			.domainId(domainId)
+			.displayName(displayName)
+			.status(status)
+			.build()
+			)
+}
+
+//Method Name : addAsset(name,displayName,typeId,status,domainId)
+
+/*
+ def addedAss=addAsset(name,displayName,string2Uuid(businessAssetId),string2Uuid(status),string2Uuid(item.id))
+ loggerApi.info("asset is added--"+addedAss)
+ */
+
+
+/**	Asset - All Reusable functions ends here	**/
+
+
+
+/**-------	ATTRIBUTE - All Reusable functions start here------	**/
+
+/**DNRF - 00011
+ * Find or get or extract bulk Attribute(s)
+ * In Builder passing parameters are below (For more info, Check API V2 documentation -> Attribute API)
+ * @param assetId 	-> Resource Id of the asset  (Optional)
+ * @param typeIds   -> Resource Id of attribute Types (List) (Optional)
+ * If all @params are not provided, this function will get all the attributes of all assets in Databook. (Not Recommended)
+ */
+
+
+def findAttributes(assetId, typeIds) {
+
+	List<Attribute> attributes = new ArrayList<Attribute>();
+	FindAttributesRequest.Builder builder = new FindAttributesRequest().builder();
+	Boolean moreToProcess  = true;
+	int offset = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Attribute> response  = attributeApi.findAttributes(builder.assetId(assetId).typeIds(typeIds).build());
+		attributes.addAll(response.getResults());
+		if(attributes.size()==response.total){
+			moreToProcess = false;
+		}
+		else {
+			offset = attributes.size();
+		}
+	}
+	return attributes;
+}
+
+//Method Name : findAttributes(assetId, typeIds)
+
+/*def typeIds =  []
+ typeIds.add(string2Uuid(definitionAttributeTypeId))
+ def findingAttributes = 	findAttributes( string2Uuid(item.id), typeIds)
+ loggerApi.info("findingAttributes ========>"+findingAttributes)
+ */
+
+
+
+/**DNRF - 00012
+ * Find or get or extract single attribute
+ * In Builder passing parameters are below (For more info, Check API V2 documentation -> Attribute API)
+ * @param assetId 	-> Resource Id of the asset where this attribute has to be added (Mandatory)
+ * @param typeIds   -> Resource Id of attribute Types (UUID) (Mandatory)
+ */
+
+
+def findAttribute(assetId, typeId) {
+	def attributes = attributeApi.findAttributes(
+			FindAttributesRequest.builder()
+			.assetId(assetId)
+			.typeIds([typeId])
+			.build()
+			).getResults()
+
+	if(!attributes.isEmpty()) {
+		return attributes.get(0)
+	}
+}
+
+//Method Name : findAttribute(assetId, typeIds)
+
+/*
+ def a1 = findAttribute(string2Uuid(assetID), null)
+ loggerApi.info(" a1=======> "+a1)
+ */
+
+
+/**
+ * DNRF - 00013
+ * ADD NEW ATTRIBUTE TO ASSET
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Attribute API)
+ * @param assetId 	 ->   Id of the asset where this attribute has to added (Mandatory)
+ * @param typeId  	 ->   Id of attribute Type (Mandatory)
+ * @param value	     ->   Attribute value from user input (Mandatory)
+ */
+
+def addAttribute( assetId, typeId, value) {
+	return attributeApi.addAttribute(
+			AddAttributeRequest.builder()
+			.assetId(assetId)
+			.typeId(typeId)
+			.value(value)
+			.build()
+			)
+}
+
+//Method Name : addAttribute( assetId, typeId, value)
+
+/*def addedAttr=addAttribute(string2Uuid(item.id),string2Uuid(descId),descValue)
+ loggerApi.info("addedAttr--"+addedAttr)
+ */
+
+/**
+ * DNRF - 00014
+ * CHANGE OR UPDATE ATTRIBUTE
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Attribute API)
+ * @param id		->  Id of attribute value which you need to update (to get id ,use findAttribute() (mandatory)
+ * @param value		->  Attribute value from user input (Mandatory)
+ */
+
+def changeAttribute(id, value) {
+	return attributeApi.changeAttribute(
+			ChangeAttributeRequest.builder()
+			.id(id)
+			.value(value)
+			.build()
+			)
+}
+
+//Method Name : changeAttribute(id, value)
+
+/*
+ def findingRequiredAttribute = findAttributesByAssetAndAttrTypes(string2Uuid(assetID), [string2Uuid(defAttr)])
+ loggerApi.info("finding ============>"+findingRequiredAttribute)
+ def attrId = findingRequiredAttribute.get(0).getId()
+ loggerApi.info("attr id is =======> " +attrId)
+ def changingAttributeName = changeAttribute(attrId, definitionHere.toString())
+ loggerApi.info("changing ==========> "+changingAttributeName)
+ */
+
+/**
+ * DNRF - 00015
+ * Getting Attribute Allowed Values By Attribute Type Id
+ * @param -> Type Id of attribute (Mandatory)
+ */
+
+def getAttributeAllowedValuesByAttributeTypeId(attributeTypeId) {
+	return attributeTypeApi.getAttributeType(attributeTypeId).getAllowedValues()
+}
+
+//Method Name : getAttributeAllowedValuesByAttributeTypeId(attributeTypeId)
+
+/*
+ def attr=getAttributeAllowedValuesByAttributeTypeId(string2Uuid(attrTypeId))
+ loggerApi.info("attr--"+attr)
+ */
+
+/**	Attribute - All Reusable functions ends here	**/
+
+
+
+/**------RELATIONS - All Reusable functions start here------**/
+
+/**
+ * DNRF - 00016
+ * Finding Relations By sourceId,targetId And relationTypeId
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Relation API)
+ * @param sourceId   	    ->  Id of the asset which falls under head asset of relation type( Mandatory ,if no targetId is given)
+ * @param relationtypeId    ->  Id of Relation type [Head ->Role ->CoRole ->Tail ] (Optional)
+ (Business Asset      	->  [Represents <- Represented by <- Data Asset] -> ResourceId)
+ * @param targetId   		->  Id of the asset which falls under tail asset of relation type(Mandatory, if no Source Id is given)
+ * If all @params are not provided, this function will get all the relations of all the assets in Databook. (Not Recommended)
+ */
+
+
+def findRelations(sourceId,relationTypeId,targetId) {
+
+	List<Relation> relations = new ArrayList<Relation>();
+	FindRelationsRequest.Builder   builder         = new FindRelationsRequest().builder();
+	Boolean moreToProcess                               = true;
+	int offset                                          = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Relation> response  =  relationApi.findRelations(builder.sourceId(sourceId).targetId(targetId).relationTypeId(relationTypeId).build());
+		relations.addAll(response.getResults());
+		if(relations.size()==response.total){
+			moreToProcess = false;
+		}
+		else
+		{
+			offset = relations.size();
+		}
+	}
+	return relations;
+}
+
+//Method Name : findRelations(sourceId,relationTypeId,targetId)
+/*
+ def findingRelations = 	findRelations(string2Uuid(sourceID), string2Uuid(addRelation1), string2Uuid(targetID))
+ loggerApi.info("findingRelations ========>"+findingRelations)
+ */
+
+/**
+ * DNRF - 00017
+ * ADDING NEW RELATION(S)
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Relation API)
+ * @param sourceId    	  ->  Id of the asset which falls under head asset of relation type (Mandatory)
+ * @param relationtypeId  ->  Id of Relation type [	Head	->	Role	->	CoRole	->	Tail ](Mandatory)
+ (Business Asset      	->  [Represents <- Represented by <- Data Asset] -> ResourceId)
+ * @param targetId   	  ->  Id of the asset which falls under tail asset of relation type (Mandatory)
+ */
+def addRelation(sourceId, targetId, relationtypeId) {
+	return relationApi.addRelation(
+			AddRelationRequest.builder()
+			.sourceId(sourceId)
+			.targetId(targetId)
+			.typeId(relationtypeId)
+			.build()
+			)
+}
+
+//Method Name : addRelation(sourceId, targetId, relationtypeId)
+/*
+ def addingRelation = addRelation(string2Uuid(sourceID), string2Uuid(targetID), string2Uuid(addRelation1))
+ loggerApi.info("addingRelation ============> "+addingRelation)
+ */
+
+/**Relation - All Reusable functions ends here**/
+
+
+
+/**-----------RESPONSIBILITIES Reuse code starts-------------**/
+
+/**
+ * DNRF - 00018
+ * Finding Responsibilities
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Responsibility API)
+ * @Param roleIds 			-> List of UUIDs of the roles (Optional)
+ * @Param ownerIds			-> List of Id's of the owners (Optional)
+ * @Param includeInherited  -> Inherited responsibilities to include (This value must be Boolean -> true/false)(Mandatory, if any @param is given)
+ * @Param resourceIds 		-> Id(s) of the resources(s) (community/domain/asset) <list> (Optional)
+ * If all @params are not provided, this function will get all the responsibilities(entitlements) in Databook. (Not Recommended)
+ * If all @params are not provided, this function will get all the responsibilities of all the assets in Databook. (Not Recommended)
+ */
+
+def findResponsibilities(ownerIds, resourceIds,includeInherited, roleIds) {
+
+	List<Attribute> responsibilities = new ArrayList<Attribute>();
+	FindResponsibilitiesRequest.Builder builder = new FindResponsibilitiesRequest().builder();
+	Boolean moreToProcess   = true;
+	int offset  = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<Attribute> response  = responsibilityApi.findResponsibilities(builder.ownerIds(ownerIds).resourceIds(resourceIds).includeInherited(includeInherited).roleIds(roleIds).build());
+		responsibilities.addAll(response.getResults());
+		if(responsibilities.size()==response.total){
+			moreToProcess = false;
+		}
+		else
+		{
+			offset = responsibilities.size();
+		}
+	}
+	return responsibilities;
+}
+
+//Method Name : findResponsibilities(ownerIds, resourceIds,includeInherited, roleIds)
+
+/*
+ def ownerIds=[]
+ ownerIds.add(string2Uuid(ownerId))
+ def findingresponsibility = 	findResponsibilities(ownerIds, resourceIds, true, roleIds)
+ loggerApi.info("findingresponsibility ========>"+findingresponsibility)
+ */
+
+/**
+ * DNRF - 00019
+ * Remove ResponsibilityById
+ * @param responsibilityId  -> UUID of responsibility(Mandatory)
+ */
+
+def removeResponsibilityById(responsibilityId) {
+	return responsibilityApi.removeResponsibility(responsibilityId)
+}
+
+/**
+ * DNRF - 00020
+ * AddResposibility
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Responsibility API)
+ * @param roleId  ->  Id of the roles for which the responsibilities should be Added(Mandatory)
+ * @param OwnerId ->  Id of the owners for which the responsibilities should be Added(Mandatory)
+ * @param resourceId ->Id of the resources(s) (community/domain/asset) <list> where you need to add responsibilities(Mandatory)
+ * @param resourceType -> the type of the resource which the responsibility is created for(Mandatory ->  ResourceType.DOMAIN , ResourceType.COMMUNITY , ResourceType.ASSET)
+ */
+
+
+
+def addResponsibility(roleId, ownerId, resourceId, resourceType) {
+	return responsibilityApi.addResponsibility(
+			AddResponsibilityRequest.builder()
+			.roleId(roleId)
+			.ownerId(ownerId)
+			.resourceId(resourceId)
+			.resourceType(resourceType)
+			.build()
+			)
+}
+
+//Method Name : removeResponsibilityById(responsibilityId)
+
+/*
+ def remove
+ if(!findingresponsibilities.isEmpty()){
+ for(findingresponsibility in findingresponsibilities){
+ remove=responsibilityApi.removeResponsibility(findingresponsibility.getId())
+ }
+ }
+ loggerApi.info('Responsibility Removed===>'+remove)
+ */
+
+/**Responsibilities Reuse code ends here**/
+
+
+/**------ViewPermission code Starts here--------------  **/
+/**
+ * DNRF - 00021
+ * Finding ViewPermissions
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Responsibility API)
+ *  @param resourceId  ->  UUID of the resource (optional)
+ *  @param ResourceType  ->  UUID of the resource (optional)
+ *  @param userId  ->  UUID of the user for which we need to find the view permissions(optional)
+ *  @param userGroupId  ->  UUID of the user group  for which we need to find the view permissions(optional)
+ *  If all @params are not provided, this function will get all the view permissions of all the resources in Databook. (Not Recommended)
+ */
+
+
+def findViewPermissions(resourceId, ResourceType, userId, userGroupId) {
+	return  viewPermissionApi.findViewPermissions(
+			FindViewPermissionRequest.builder()
+			.resourceId(resourceId)
+			.resourceType(ResourceType)
+			.userId(userId)
+			.userGroupId(userGroupId)
+			.build()
+			).getResults()
+
+}
+
+
+//Method Name :findViewPermissions(resourceId, ResourceType, userId, userGroupId)
+/*
+ def findingViewPermissions = 	findViewPermissions(resourceId, null, userId, null)
+ loggerApi.info("findingViewPermissions ========>"+findingViewPermissions)
+ */
+
+/**
+ * DNRF - 00022
+ * Add ViewPermissions
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Responsibility API)
+ *  @param userId  ->  UUID of the user for which we need to add the view permissions(Mandatory, if no userGroupId is given)
+ *  @param userGroupId  ->  UUID of the user group  for which we need to add the view permissions(Mandatory, if no userId is given)
+ *  @param requestResourceReference  ->  Object is created as the below example which has resource Id and type(mandatory)
+ example:
+ ResourceReference requestResourceReference = new ResourceReference() {
+ @Override public UUID getId(){ return UUID.fromString(uuid2String(resourceId));}
+ @Override public ResourceType getResourceType(){ return ResourceType.Domain;}
+ }
+ */
+
+def addViewPermission(userId, userGroupId, ResourceReference) {
+	return viewPermissionApi.addViewPermission(
+			AddViewPermissionRequest.builder()
+			.userId(userId)
+			.userGroupId(userGroupId)
+			.baseResource(requestResourceReference)
+			.build()
+			)
+}
+
+
+//Method Name :addViewPermission(userId, userGroupId, ResourceReference)
+/*
+ ResourceReference requestResourceReference = new ResourceReference() {
+ @Override public UUID getId(){ return UUID.fromString(uuid2String(resourceId));}
+ @Override public ResourceType getResourceType(){ return ResourceType.Domain;}
+ }
+ def addingViewPermissions = 	addViewPermission(userId, null, requestResourceReference)
+ loggerApi.info("addingViewPermissions ========>"+addingViewPermissions)
+ */
+
+/**
+ * DNRF - 00023
+ * Remove View permissions
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Responsibility API)
+ *  @param userId  -> the identifier of the view permission to remove <string> (optional)
+ */
+
+def removeViewPermission(userId) {
+	viewPermissionApi.removeViewPermission(userId)
+}
+
+//Method Name : removeViewPermission(userId)
+/*
+ * findingViewPermissions = 	findViewPermissions(resourceId, null, userId, null)
+ * for(user in findingViewPermissions){
+ def removed = viewPermissionApi.removeViewPermission(uuid2String(user.getId()))
+ loggerApi.info("removed ===>" + removed)
+ }
+ */
+/**---------- USERS Reuse code starts here----------**/
+
+/**DNRF - 00024
+ * Getting user info
+ * @param userId  -> UUID of user (Mandatory)
+ */
+
+def getUserInfo(userId) {
+	def userInfo
+	if(userId==null)
+	{
+		def user = userApi.getCurrentUser().get().getId()
+		return userInfo=userApi.getUser(user)
+	}
+	else {
+		return userInfo=userApi.getUser(userId)
+	}
+}
+
+//Method Name : getUserInfo(userId)
+
+/**
+ * DNRF - 00025
+ * Finding Users By UserName
+ * To get user info by single username
+ * @param userName  ->  Name of the user (Optional)
+ * @param onlyLoggedIn -> Only loggedin users (Optional) (Boolean -> true/false)
+ * @param userIds -> UUIDs of users (Optional)
+ * @param groupId -> UUID of group (Optional)
+ * If all @params are not provided, this function will get all the users in Databook. (Not Recommended)
+ */
+
+def findUsers(userName,userIds,groupId,onlyLoggedIn) {
+
+	List<User> users = new ArrayList<User>();
+	FindUsersRequest.Builder   builder         = new FindUsersRequest().builder();
+	Boolean moreToProcess                               = true;
+	int offset                                          = 0;
+	while(moreToProcess){
+		builder
+				.offset(offset)
+				.limit(1000)
+		PagedResponse<User> response  = userApi.findUsers(builder.name(userName).userIds(userIds).groupId(groupId).includeDisabled(false).onlyLoggedIn(onlyLoggedIn).build());
+		users.addAll(response.getResults());
+		if(users.size()==response.total){
+			moreToProcess = false;
+		}
+		else
+		{
+			offset = users.size();
+		}
+	}
+	return users;
+}
+
+//Method Name :  findUsers(userName,userIds,groupId,onlyLoggedIn)
+
+/*
+ users = findUsers(userName,userIds,groupId,onlyLoggedIn)
+ loggerApi.info('users-->'+users)
+ }
+ */
+/**---------- Users Reuse code ends here----------**/
+
+/**
+ * DNRF - 00026
+ * Removing ASSET Tags with passing parameters assetId, tagNames
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param assetId       -> UUID of the Asset (Mandatory)
+ * @param tagNames      -> <List>Names of the tags to be removed from given asset (Mandatory)
+ */
+def removeAssetTags(assetId,tagNames) {
+	return assetApi.removeAssetTags(RemoveAssetTagsRequest.builder()
+			.assetId(assetId)
+			.tagNames(tagNames)
+			.build()
+			)
+}
+//Method Name : removeAssetTags(assetId,tagNames)
+
+
+/**
+ * DNRF - 00027
+ * Setting ASSET Attributes with passing parameters assetId, typeId, values
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param assetId     -> UUID of the Asset (Mandatory)
+ * @param typeId      -> Attribute Type Id (Mandatory)
+ * @param values      -> List of attribute values(Mandatory)
+ */
+def setAssetAttributes(assetId,typeId,values) {
+	return assetApi.setAssetAttributes(SetAssetAttributesRequest.builder()
+			.assetId(assetId)
+			.typeId(typeId)
+			.values(values)
+			.build()
+			)
+}
+
+//Method Name : setAssetAttributes(assetId,typeId,values)
+
+/*val=[]
+ val.add(value)
+ def asst=setAssetAttributes(string2Uuid(item.id),string2Uuid(attrTypeId),val)
+ */
+
+/**
+ * DNRF - 00028
+ * Setting ASSET Relations with passing parameters assetId, relatedAssetIds, relationDirection, typeId
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param assetId            -> UUID of the Asset
+ * @param relatedAssetIds    -> List of related asset UUID's
+ * @param relationDirection  -> Direction of the relation
+ * @param typeId             -> Asset Type Id to which this asset is instance of
+ */
+def setAssetRelations(assetId,relatedAssetIds,relationDirection,typeId) {
+	return assetApi.setAssetRelations(SetAssetRelationsRequest.builder()
+			.assetId(assetId)
+			.relatedAssetIds(relatedAssetIds)
+			.relationDirection(relationDirection)
+			.typeId(typeId)
+			.build()
+			)
+}
+//Method Name : setAssetRelations(assetId,relatedAssetIds,relationDirection,typeId)
+/*
+ * def setRelation = setAssetRelations(assetId,relatedAssetIds,relationDirection,typeId)
+ * loggerApi.info("setRelation======> "+setRelation)
+ */
+
+/**
+ * DNRF - 00029
+ * Setting ASSET Responsibilities with passing parameters assetId, ownerIds, roleId
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param assetId   -> UUID of the Asset(Mandatory)
+ * @param ownerIds  -> List of Id's of the owners for which the responsibilities should be found (Optional)
+ * @param roleId    -> Id of the role for which the responsibilities should be found(Optional)
+ */
+def setAssetResponsibilities(assetId,ownerIds,roleId) {
+	return assetApi.setAssetResponsibilities(SetAssetResponsibilitiesRequest.builder()
+			.assetId(assetId)
+			.ownerIds(ownerIds)
+			.roleId(roleId)
+			.build()
+			)
+}
+
+//Method Name : setAssetResponsibilities(assetId,ownerIds,roleId)
+
+/*def startUserId=userApi.getCurrentUser().get().getId()
+ def ownerIds=[]
+ ownerIds.add(startUserId)
+ def assetRes=setAssetResponsibilities(string2Uuid(item.id),ownerIds,string2Uuid(applicationOwnerRoleId))
+ loggerApi.info("assetRes----"+assetRes)
+ */
+
+
+/**
+ * DNRF - 00030
+ * Setting ASSET Responsibilities with passing parameters assetId, tagNames
+ * In Builder passing parameters are below (For more info ,Check API V2 documentation -> Asset API)
+ * @param assetId   -> UUID of the Asset(Mandatory)
+ * @param tagNames  -> <List>Names of the tags to be applied on given asset(Mandatory)
+ */
+def setAssetTags(assetId,tagNames) {
+	return assetApi.setAssetTags(SetAssetTagsRequest.builder()
+			.assetId(assetId)
+			.tagNames(tagNames)
+			.build()
+			)
+}
+
+//Method Name : setAssetResponsibilities(assetId,ownerIds,roleId)
+/*
+ def setTag = setAssetTags(assetId,tagNames)
+ loggerApi.info("setTag=======> "+setTag)
+ */
+
+/**
+ * DNRF - 00031
+ * Getting Workflow UUID by passing parameter processId
+ * In Builder passing parameter id below (For more info ,Check API V2 documentation -> Asset API)
+ * @param processId		->	process Id of the worklflow (string ,Mandatory)
+ *
+ */
+def getWorkflowUUIDByProcessId(processId) {
+	def result = workflowDefinitionApi.getWorkflowDefinitionByProcessId(processId)
+	return result.getId()
+}
+
+//Method Name :	getWorkflowUUIDByProcessId(processId)
+
+/*
+ EXAMPLE:
+ def workflowId = "dsrDescribeDataSet"
+ def result = getWorkflowUUIDByProcessId(workflowId)
+ loggerApi.info("result========> "+result)
+ */
+
+/*-------------------------------------------- */
+
+
+def startWorkflowInstance(workflowDefinitionId,businessItemIds,businessItemType,formProperties) {
+	return workflowInstanceApi.startWorkflowInstances(StartWorkflowInstancesRequest.builder()
+			.workflowDefinitionId(workflowDefinitionId)
+			.businessItemIds(businessItemIds)
+			.businessItemType(businessItemType)
+			.formProperties(formProperties)
+			.build()
+			)
+}
+
+/*** ----- Adding Comment ----- ***/
+
+def addComment(baseResourceId,baseResourceType,content) {
+	return commentApi.addComment(
+			AddCommentRequest.builder()
+			.baseResourceId(baseResourceId)
+			.baseResourceType(baseResourceType)
+			.content(content)
+			.build()
+			)
+}
+
+
+def attributeUpsert(assetUUID, value, attributeId) {
+	def tAttributes = findAttributes(assetUUID, [string2Uuid(attributeId)])
+	if(!tAttributes.isEmpty()) {
+		def tAttrId = tAttributes.get(0).getId()
+		changeAttribute(tAttrId, value)
+	}
+	else {
+		addAttribute(assetUUID, string2Uuid(attributeId), value)
+	}
+}
+
+import com.collibra.dgc.core.api.dto.usergroup.FindUserGroupsRequest
+
+def findingUserGroupsByName(groupName,nameMatchMode){
+	return userGroupApi.findUserGroups(FindUserGroupsRequest.builder()
+			.name(groupName)
+			.nameMatchMode(nameMatchMode)
+			.build()
+			).getResults()
+}
+
+def getUTCDate = { Date date->
+	SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("MM/dd/yyyy")
+	DATE_FORMAT.setTimeZone(TimeZone.getTimeZone("UTC"))
+	return DATE_FORMAT.parse(DATE_FORMAT.format(date)).time.toString()
+}
+// find getUserNamesFromResponsibility
+def getUserIdsFromResponsibility(ownerIds, resourceIds, roleIds) {
+	def userIds = []
+	def responsibilityFind = findResponsibilities(ownerIds, resourceIds, true, roleIds)
+	loggerApi.info("responsibilityFind==>"+responsibilityFind)
+	if(!responsibilityFind.isEmpty()){
+		responsibilityFind.each {
+			def eachOwner = it.getOwner()
+			def eachOwnerId = eachOwner.getId()
+			if(eachOwner.getResourceType() == ResourceType.UserGroup){
+				def groupId = it.getOwner().getId()
+				def groupUsers = findUsers(null,null,groupId,false)
+				for(user in groupUsers) {
+					userIds.add(user.getId())
+				}
+			}else {
+				def ownerUserId = userApi.getUser(eachOwnerId).getId()
+				userIds.add(ownerUserId)
+			}
+		}
+	}
+	return userIds;
+}
+
+def findWorkflowTasks(businessItemId,businessItemType) {
+return  workflowTaskApi.findWorkflowTasks(FindWorkflowTasksRequest.builder()
+	.businessItemId(businessItemId)
+	.businessItemType(businessItemType)
+	.build()
+	).getResults()
+}
+	]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow20" sourceRef="startevent1" targetRef="scripttask8"></sequenceFlow>
+    <sequenceFlow id="flow21" sourceRef="usertask3" targetRef="scripttask6"></sequenceFlow>
+    <userTask id="usertask2" name="Service now is integrated sucessfully" activiti:candidateUsers="user(${startUser})"></userTask>
+    <sequenceFlow id="flow23" sourceRef="scripttask7" targetRef="mailtask2"></sequenceFlow>
+    <scriptTask id="scripttask9" name="Impact and Urgency Values" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+def urgencyValuesMap = [:]
+def impactValuesMap = [:]
+//Get urgency attribute allowed values
+def urgencyAllowedValues = getAttributeAllowedValuesByAttributeTypeId(string2Uuid(urgencyAttrTypeId))
+if(!urgencyAllowedValues.isEmpty()) {
+	urgencyAllowedValues.each{
+		urgencyValuesMap[it] = it
+	}
+}
+
+//Get impact attribute allowed values
+def impactAllowedValues =  getAttributeAllowedValuesByAttributeTypeId(string2Uuid(impactAttrTypeId))
+if(!impactAllowedValues.isEmpty()) {
+	impactAllowedValues.each{
+		impactValuesMap[it] = it
+	}
+}
+execution.setVariable("urgencyValuesMap",urgencyValuesMap)
+execution.setVariable("impactValuesMap",impactValuesMap)]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow24" sourceRef="scripttask8" targetRef="scripttask9"></sequenceFlow>
+    <userTask id="usertask3" name="Select Impact and Urgency " activiti:candidateUsers="user(${startUser})">
+      <extensionElements>
+        <activiti:formProperty id="impactRequestReason" name="&lt;b&gt; Impact &lt;/b&gt;" type="dynamicEnum" required="true">
+          <activiti:value id="dynamicValuesExpression" name="${impactValuesMap}"></activiti:value>
+        </activiti:formProperty>
+        <activiti:formProperty id="urgencyRequestReason" name="&lt;b&gt; Urgency &lt;/b&gt;" type="dynamicEnum" required="true">
+          <activiti:value id="dynamicValuesExpression" name="${urgencyValuesMap}"></activiti:value>
+        </activiti:formProperty>
+        <activiti:formProperty id="description" name="&lt;b&gt; Description &lt;/b&gt;" type="string"></activiti:formProperty>
+      </extensionElements>
+    </userTask>
+    <sequenceFlow id="flow25" sourceRef="scripttask9" targetRef="usertask3"></sequenceFlow>
+  </process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Collaboration">
+    <bpmndi:BPMNPlane bpmnElement="Collaboration" id="BPMNPlane_Collaboration">
+      <bpmndi:BPMNShape bpmnElement="pool1" id="BPMNShape_pool1">
+        <omgdc:Bounds height="331.0" width="1391.0" x="10.0" y="63.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="lane1" id="BPMNShape_lane1">
+        <omgdc:Bounds height="331.0" width="1371.0" x="30.0" y="63.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="startevent1" id="BPMNShape_startevent1">
+        <omgdc:Bounds height="35.0" width="35.0" x="50.0" y="163.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask6" id="BPMNShape_scripttask6">
+        <omgdc:Bounds height="55.0" width="151.0" x="530.0" y="153.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="exclusivegateway3" id="BPMNShape_exclusivegateway3">
+        <omgdc:Bounds height="40.0" width="40.0" x="717.0" y="160.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="endevent2" id="BPMNShape_endevent2">
+        <omgdc:Bounds height="35.0" width="35.0" x="720.0" y="243.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask7" id="BPMNShape_scripttask7">
+        <omgdc:Bounds height="70.0" width="221.0" x="1020.0" y="146.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="mailtask2" id="BPMNShape_mailtask2">
+        <omgdc:Bounds height="55.0" width="121.0" x="1260.0" y="153.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="endevent3" id="BPMNShape_endevent3">
+        <omgdc:Bounds height="35.0" width="35.0" x="1303.0" y="290.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask8" id="BPMNShape_scripttask8">
+        <omgdc:Bounds height="55.0" width="125.0" x="110.0" y="153.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="usertask2" id="BPMNShape_usertask2">
+        <omgdc:Bounds height="71.0" width="201.0" x="790.0" y="145.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask9" id="BPMNShape_scripttask9">
+        <omgdc:Bounds height="55.0" width="111.0" x="260.0" y="153.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="usertask3" id="BPMNShape_usertask3">
+        <omgdc:Bounds height="55.0" width="105.0" x="390.0" y="153.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge bpmnElement="flow14" id="BPMNEdge_flow14">
+        <omgdi:waypoint x="681.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="717.0" y="180.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow15" id="BPMNEdge_flow15">
+        <omgdi:waypoint x="737.0" y="200.0"></omgdi:waypoint>
+        <omgdi:waypoint x="737.0" y="243.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="16.0" width="24.0" x="753.0" y="228.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow17" id="BPMNEdge_flow17">
+        <omgdi:waypoint x="757.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="790.0" y="180.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="16.0" width="65.0" x="717.0" y="123.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow18" id="BPMNEdge_flow18">
+        <omgdi:waypoint x="991.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1020.0" y="181.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow19" id="BPMNEdge_flow19">
+        <omgdi:waypoint x="1320.0" y="208.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1320.0" y="290.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow20" id="BPMNEdge_flow20">
+        <omgdi:waypoint x="85.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="110.0" y="180.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow21" id="BPMNEdge_flow21">
+        <omgdi:waypoint x="495.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="530.0" y="180.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow23" id="BPMNEdge_flow23">
+        <omgdi:waypoint x="1241.0" y="181.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1260.0" y="180.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow24" id="BPMNEdge_flow24">
+        <omgdi:waypoint x="235.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="260.0" y="180.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow25" id="BPMNEdge_flow25">
+        <omgdi:waypoint x="371.0" y="180.0"></omgdi:waypoint>
+        <omgdi:waypoint x="390.0" y="180.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</definitions>

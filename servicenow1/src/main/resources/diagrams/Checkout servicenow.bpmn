@@ -1,0 +1,1142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:activiti="http://activiti.org/bpmn" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:omgdc="http://www.omg.org/spec/DD/20100524/DC" xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI" typeLanguage="http://www.w3.org/2001/XMLSchema" expressionLanguage="http://www.w3.org/1999/XPath" targetNamespace="http://www.collibra.com/apiv2">
+  <collaboration id="Collaboration">
+    <participant id="pool1" name="Request Assets Access" processRef="RequestDataSetsAccess"></participant>
+  </collaboration>
+  <process id="RequestDataSetsAccess" name="Request Assets Access" isExecutable="true">
+    <documentation>Use this flow to request access to all assets referenced in this shopping cart. The owners of the related data will have to approve the request.</documentation>
+    <laneSet id="laneSet_RequestDataSetsAccess">
+      <lane id="lane1" name="Requester">
+        <flowNodeRef>endevent1</flowNodeRef>
+        <flowNodeRef>servicetask1</flowNodeRef>
+        <flowNodeRef>servicetask4</flowNodeRef>
+        <flowNodeRef>initDataUsageRequest</flowNodeRef>
+        <flowNodeRef>validateDataElements</flowNodeRef>
+        <flowNodeRef>exclusivegateway2</flowNodeRef>
+        <flowNodeRef>handleInvalidDataElement</flowNodeRef>
+        <flowNodeRef>endevent3</flowNodeRef>
+        <flowNodeRef>servicetask9</flowNodeRef>
+        <flowNodeRef>servicetask10</flowNodeRef>
+        <flowNodeRef>generateDataUsageName</flowNodeRef>
+        <flowNodeRef>assignRequesterRoleToDataUsage</flowNodeRef>
+        <flowNodeRef>identifyReportsAndDataSets</flowNodeRef>
+        <flowNodeRef>findReportApprovers</flowNodeRef>
+        <flowNodeRef>consolidateApprovers</flowNodeRef>
+        <flowNodeRef>exclusivegateway5</flowNodeRef>
+        <flowNodeRef>validateReports</flowNodeRef>
+        <flowNodeRef>terminateendevent1</flowNodeRef>
+        <flowNodeRef>exclusivegateway5</flowNodeRef>
+        <flowNodeRef>handleInvalidReports</flowNodeRef>
+        <flowNodeRef>terminateendevent2</flowNodeRef>
+        <flowNodeRef>inclusivegateway1</flowNodeRef>
+        <flowNodeRef>inclusivegateway2</flowNodeRef>
+        <flowNodeRef>markAsApprovalPending</flowNodeRef>
+        <flowNodeRef>servicetask11</flowNodeRef>
+        <flowNodeRef>scripttask12</flowNodeRef>
+        <flowNodeRef>exclusivegateway8</flowNodeRef>
+        <flowNodeRef>scripttask13</flowNodeRef>
+        <flowNodeRef>endevent6</flowNodeRef>
+        <flowNodeRef>startevent1</flowNodeRef>
+        <flowNodeRef>scripttask14</flowNodeRef>
+        <flowNodeRef>usertask1</flowNodeRef>
+      </lane>
+      <lane id="lane2" name="Approver">
+        <flowNodeRef>callactivity1</flowNodeRef>
+        <flowNodeRef>exclusivegateway1</flowNodeRef>
+      </lane>
+    </laneSet>
+    <endEvent id="endevent1" name="End"></endEvent>
+    <scriptTask id="servicetask1" name="Init data usage request" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.core.api.dto.instance.relation.FindRelationsRequest
+                import com.collibra.dgc.core.api.model.instance.Asset
+                import com.collibra.dgc.core.api.model.instance.Relation
+                import com.collibra.dgc.core.api.model.user.User
+                import com.collibra.dgc.workflow.api.exception.WorkflowException
+                import com.collibra.catalog.api.component.businessmodel.dto.FindDataElementsRequest
+
+                ASSET_IS_ESSENTIAL_FOR_DATA_USAGE='00000000-0000-0000-0000-000000007061'
+                META_DATA_SET='00000000-0000-0000-0001-000400000001'
+
+                List relations = relationApi.findRelations(FindRelationsRequest.builder()
+                .targetId(item.id)
+                .relationTypeId(string2Uuid(ASSET_IS_ESSENTIAL_FOR_DATA_USAGE))
+                .build()).getResults()
+
+                Set validators = new HashSet()
+                for (Relation relation : relations) {
+                // the data set is the source of the relation
+                Asset sourceDataSet = assetApi.getAsset(relation.source.id);
+                if (sourceDataSet != null && hasParentDataSetType(sourceDataSet)) {
+                validators.addAll(findValidatorsForDataset(sourceDataSet))
+                }
+                }
+
+                List asUserExpression = validators.collect {"user(${it})"}
+                execution.setVariable("approverUserExpression", utility.toCsv(asUserExpression))
+
+                def findValidatorsForDataset(Asset sourceDataSet) {
+                def validators = []
+                for (Asset col : findDataElements(sourceDataSet.id)) {
+                User validator = columnApi.findValidatorForColumn(col.id)
+                if (validator == null) {
+                loggerApi.error("couldn't find a suitable approver for usage request on data set '" +
+                sourceDataSet.getName() + "' (no steward on asset and no creator id)")
+                throw new WorkflowException(translation.getMessage('workflowNoApprover', sourceDataSet.getName()))
+                }
+                validators.add(validator.getUserName())
+                }
+
+                return validators
+                }
+
+                def hasParentDataSetType(Asset asset) {
+                string2Uuid(META_DATA_SET) == asset.type.id ||
+                assetTypeApi.findParentTypes(asset.type.id).any { string2Uuid(META_DATA_SET) == it.id }
+                }
+
+                def findDataElements(dataSetId) {
+                return dataSetApi.findDataElements(FindDataElementsRequest.builder()
+                .dataSetId(dataSetId).limit(Integer.MAX_VALUE)
+                .build()).results
+                }
+            ]]></script>
+    </scriptTask>
+    <callActivity id="callactivity1" name="request approval" calledElement="votingSubProcess" activiti:inheritVariables="false">
+      <extensionElements>
+        <activiti:in sourceExpression="Please vote for the approval of the data usage. If you want to reject, please provide a reason for doing so." target="decisionInfo"></activiti:in>
+        <activiti:in source="approverUserExpression" target="voterUserExpression"></activiti:in>
+        <activiti:in source="voteCompletionPercentage" target="votePercentage"></activiti:in>
+        <activiti:in sourceExpression="${true}" target="addComments"></activiti:in>
+        <activiti:in sourceExpression="${true}" target="earlyComplete"></activiti:in>
+        <activiti:in source="voteWarningTimeDuration" target="voteWarningTimeDuration"></activiti:in>
+        <activiti:in source="voteTimeoutDuration" target="voteTimeoutDuration"></activiti:in>
+        <activiti:in sourceExpression="${&quot;Approve/Reject&quot;}" target="voteButtonLabel"></activiti:in>
+        <activiti:in sourceExpression="${&quot;Approve&quot;}" target="voteTaskName"></activiti:in>
+        <activiti:in source="sendVotingActionEmails" target="sendActionEmail"></activiti:in>
+        <activiti:in sourceExpression="result_datausagerequest" target="resultTemplate"></activiti:in>
+        <activiti:in sourceExpression="reminder_datausagerequest" target="reminderTemplate"></activiti:in>
+        <activiti:out source="votingSuccess" target="votingResult"></activiti:out>
+      </extensionElements>
+    </callActivity>
+    <exclusiveGateway id="exclusivegateway1" name="Exclusive Gateway"></exclusiveGateway>
+    <sequenceFlow id="flow3" sourceRef="callactivity1" targetRef="exclusivegateway1"></sequenceFlow>
+    <sequenceFlow id="flow5" name="rejected" sourceRef="exclusivegateway1" targetRef="servicetask10">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${!votingResult}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow6" name="accepted" sourceRef="exclusivegateway1" targetRef="servicetask11">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${votingResult}]]></conditionExpression>
+    </sequenceFlow>
+    <scriptTask id="servicetask4" name="notify requester" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+        def usersIds = users.getUserIds("user(${requester})")
+        mail.sendMails(usersIds, "usageAccepted", null, execution)
+    ]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow9" sourceRef="servicetask4" targetRef="endevent1"></sequenceFlow>
+    <scriptTask id="initDataUsageRequest" name="Init data usage request" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+import com.collibra.dgc.core.api.model.instance.Asset
+import com.collibra.dgc.core.api.dto.instance.attribute.AddAttributeRequest
+import com.collibra.dgc.core.api.dto.instance.asset.ChangeAssetRequest
+import com.collibra.dgc.workflow.api.exception.WorkflowException
+
+PURPOSE_TYPE='00000000-0000-0000-0000-000000000207'
+STATUS_INVALID='00000000-0000-0000-0000-000000005022'
+EFFECTIVE_START_DATE_TYPE='00000000-0000-0000-0000-000000000257'
+EFFECTIVE_END_DATE_TYPE='00000000-0000-0000-0000-000000000254'
+
+
+if (item == null) {
+loggerApi.error("Cannot execute workflow. The context doesn't provide a valid Data Usage asset (no item)")
+throw new WorkflowException(translation.getMessage('workflowNoValidDataUsage'))
+}
+if (item.id == null) {
+loggerApi.error("Cannot execute workflow. The context doesn't provide a valid Data Usage asset (item id is null)")
+throw new WorkflowException(translation.getMessage('workflowNoValidDataUsage'))
+}
+
+STATUS_CANDIDATE = string2Uuid("00000000-0000-0000-0000-000000005008")
+
+Asset usage = assetApi.getAsset(item.getId())
+
+setUsageReason(usage, execution)
+setUsageStartTime(usage, execution)
+setUsageEndTime(usage, execution)
+
+String dataUsageName = execution.getVariable('dataUsageName')
+assetApi.changeAsset(ChangeAssetRequest.builder()
+.name(dataUsageName)
+.displayName(dataUsageName)
+.statusId(string2Uuid(STATUS_INVALID))
+.id(item.id)
+.build())
+execution.setVariable("dataUsage", usage)
+
+
+
+def setUsageStartTime(Asset asset, execution) {
+def startDate = execution.getVariable('startTime')
+attributeApi.addAttribute(AddAttributeRequest.builder()
+.assetId(asset.getId())
+.typeId(string2Uuid(EFFECTIVE_START_DATE_TYPE))
+.value(startDate.getTime() as String)
+.build())
+}
+
+def setUsageEndTime(Asset asset, execution) {
+def endDate = execution.getVariable('endTime')
+attributeApi.addAttribute(AddAttributeRequest.builder()
+.assetId(asset.getId())
+.typeId(string2Uuid(EFFECTIVE_END_DATE_TYPE))
+.value(endDate.getTime() as String)
+.build())
+}
+def setUsageReason(Asset asset, execution) {
+String reason = execution.getVariable('usageRequestReason').string
+attributeApi.addAttribute(AddAttributeRequest.builder()
+.assetId(asset.getId())
+.typeId(string2Uuid(PURPOSE_TYPE))
+.value(reason)
+.build())
+}
+]]></script>
+    </scriptTask>
+    <scriptTask id="validateDataElements" name="Validate data elements" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.core.api.dto.instance.relation.FindRelationsRequest
+                import com.collibra.dgc.core.api.model.instance.Asset
+                import com.collibra.dgc.core.api.model.instance.Relation
+                import com.collibra.dgc.core.api.model.user.User
+                import com.collibra.catalog.api.component.businessmodel.dto.FindDataElementsRequest
+                ASSET_IS_ESSENTIAL_FOR_DATA_USAGE='00000000-0000-0000-0000-000000007061'
+                META_DATA_SET='00000000-0000-0000-0001-000400000001'
+
+                boolean valid = false
+                Asset usage = assetApi.getAsset(item.id)
+                List columns = getColumns(usage)
+                if (columns.size() == 0) {
+                execution.setVariable('reasonForInvalidDataElements', 'workflowNoDataElementInShoppingBasket')
+                } else {
+                valid = checkDataElements(columns)
+                if (!valid) {
+                execution.setVariable('reasonForInvalidDataElements', 'workflowNoOwner')
+                }
+                }
+
+                execution.setVariable("validDataElements", valid)
+
+                def getColumns(Asset usage) {
+                def columns = []
+                // usage is a Data Usage asset, which holds relations to Data Sets
+                List relations = relationApi.findRelations(
+                FindRelationsRequest.builder()
+                .targetId(usage.id)
+                .relationTypeId(string2Uuid(ASSET_IS_ESSENTIAL_FOR_DATA_USAGE))
+                .limit(Integer.MAX_VALUE)
+                .build()).getResults()
+
+
+                for (Relation relation : relations) {
+                // the data set is the source of the relation
+                Asset sourceDataSet = assetApi.getAsset(relation.source.id)
+                if (hasParentDataSetType(sourceDataSet)) {
+                columns.addAll(findDataElements(sourceDataSet.id))
+                }
+                }
+
+
+                return columns
+                }
+                def findDataElements(dataSetId) {
+                return dataSetApi.findDataElements(FindDataElementsRequest.builder()
+                .dataSetId(dataSetId).limit(Integer.MAX_VALUE)
+                .build()).results
+                }
+                def hasParentDataSetType(Asset asset) {
+                string2Uuid(META_DATA_SET) == asset.type.id ||
+                assetTypeApi.findParentTypes(asset.type.id).any { string2Uuid(META_DATA_SET) == it.id }
+                }
+
+                private boolean checkDataElements(List columns) {
+                for (Asset col : columns) {
+                User user = columnApi.findValidatorForColumn(col.id)
+                if (user == null) {
+                loggerApi.error("The following column is part of the request and has no owner: " + col
+                .getName() + " (" + col.getId() + ")");
+                return false
+                }
+                }
+                return true
+                }
+            ]]></script>
+    </scriptTask>
+    <exclusiveGateway id="exclusivegateway2" name="Exclusive Gateway"></exclusiveGateway>
+    <sequenceFlow id="flow12" name="valid" sourceRef="exclusivegateway2" targetRef="servicetask1">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${validDataElements}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow13" name="invalid" sourceRef="exclusivegateway2" targetRef="handleInvalidDataElement">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${!validDataElements}]]></conditionExpression>
+    </sequenceFlow>
+    <scriptTask id="handleInvalidDataElement" name="Handle Invalid Data Element" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.workflow.api.exception.WorkflowException
+
+                if (execution.getVariable("reasonForInvalidDataElements") == 'workflowNoOwner') {
+                loggerApi.error("Cannot request data usage because at least one data element doesn't have an Owner role assigned to it.");
+                throw new WorkflowException(translation.getMessage('workflowNoOwner'));
+                }
+                if (execution.getVariable("reasonForInvalidDataElements") == 'workflowNoDataElementInShoppingBasket') {
+                loggerApi.error("Cannot request data usage when shopping basket is empty or only contains empty Data Sets.");
+                throw new WorkflowException(translation.getMessage('workflowNoDataElementInShoppingBasket'));
+                }
+            ]]></script>
+    </scriptTask>
+    <endEvent id="endevent3" name="End"></endEvent>
+    <sequenceFlow id="flow15" sourceRef="servicetask9" targetRef="endevent3"></sequenceFlow>
+    <scriptTask id="servicetask9" name="notify rejected approval" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+        def usersIds = users.getUserIds("user(${requester})")
+        mail.sendMails(usersIds, "usageRefused", null, execution)
+    ]]></script>
+    </scriptTask>
+    <scriptTask id="servicetask10" name="Mark as refused" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.core.api.dto.instance.asset.ChangeAssetRequest
+
+                REJECTED_STATUS_ID = string2Uuid("00000000-0000-0000-0000-000000005010")
+
+                def changedAsset = assetApi.changeAsset(ChangeAssetRequest.builder()
+                .id(item.id)
+                .statusId(REJECTED_STATUS_ID)
+                .build())
+            ]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow17" sourceRef="servicetask10" targetRef="servicetask9"></sequenceFlow>
+    <scriptTask id="generateDataUsageName" name="Generate data usage name" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import java.time.format.DateTimeFormatter
+                import java.time.LocalDate
+                import com.collibra.dgc.core.api.dto.instance.asset.FindAssetsRequest
+                import com.collibra.dgc.core.api.dto.MatchMode
+                import com.collibra.dgc.core.api.model.instance.Asset
+
+                def getDateString() {
+                FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+                LocalDate date = LocalDate.now()
+                return date.format(FORMATTER)
+                }
+
+                private int getCounter(String prefix) {
+                // find all data usage requests for today
+                // Remark: we can't have 2 assets of the same name in a single domain
+                // must not check the type since another asset of another type might have a matching name (unlikely)
+
+                List result = assetApi.findAssets(FindAssetsRequest.builder()
+                .communityId(item.communityId)
+                .domainId(item.domainId)
+                .name(prefix)
+                .nameMatchMode(MatchMode.START)
+                .excludeMeta(false)
+                .limit(Integer.MAX_VALUE)
+                .build()).getResults();
+                // find the index of the latest data usage request for today
+                int maxIndex = 0;
+                for (Asset asset : result) {
+                String name = asset.getName()
+                int crossIndex = name.indexOf('#')
+                if (crossIndex > -1) {
+                int index = name.substring(crossIndex + 1) as Integer
+                maxIndex = Math.max(maxIndex, index)
+                }
+                }
+
+                return maxIndex + 1;
+                }
+
+
+                String dateString = getDateString()
+                String prefix = dateString + " #"
+                int counter = getCounter(prefix)
+                String result = prefix + counter
+                execution.setVariable("dataUsageName", result)
+                loggerApi.debug("name set to ${result}")
+            ]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow23" sourceRef="generateDataUsageName" targetRef="initDataUsageRequest"></sequenceFlow>
+    <scriptTask id="assignRequesterRoleToDataUsage" name="Assign requester role to data usage" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+import com.collibra.dgc.core.api.dto.instance.responsibility.AddResponsibilityRequest
+import com.collibra.dgc.core.api.dto.user.FindUsersRequest
+loggerApi.info("requester=============>??")
+REQUESTER_ROLE_ID = string2Uuid("00000000-0000-0000-0000-000000005033")
+
+def user = userApi.findUsers(FindUsersRequest.builder()
+.name(requester)
+.build())
+.getResults()
+.first()
+
+responsibilityApi.addResponsibility(AddResponsibilityRequest.builder()
+.ownerId(user.id)
+.resourceId(item.id)
+.roleId(REQUESTER_ROLE_ID)
+.resourceType(item.type)
+.build())
+
+]]></script>
+    </scriptTask>
+    <scriptTask id="identifyReportsAndDataSets" name="Identify reports and data sets" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+import com.collibra.dgc.core.api.dto.instance.relation.FindRelationsRequest
+import com.collibra.dgc.core.api.dto.meta.assettype.FindAssetTypesRequest
+import com.collibra.dgc.core.api.dto.meta.assettype.FindSubAssetTypesRequest
+import com.collibra.dgc.workflow.api.exception.WorkflowException
+
+def usageId = item.id
+Set dataSets = []
+Set reports = []
+ASSET_IS_ESSENTIAL_FOR_DATA_USAGE='00000000-0000-0000-0000-000000007061'
+REPORT_ASSET_TYPE_ID='00000000-0000-0000-0000-000000031102'
+DATA_SET_ASSET_TYPE_ID='00000000-0000-0000-0001-000400000001'
+
+
+def relations = relationApi.findRelations(FindRelationsRequest.builder()
+		.targetId(usageId)
+		.relationTypeId(string2Uuid(ASSET_IS_ESSENTIAL_FOR_DATA_USAGE))
+		.limit(Integer.MAX_VALUE)
+		.build()).getResults()
+
+def findReportsChildrenAssetTypesRequest = FindSubAssetTypesRequest.builder()
+		.includeParent(true)
+		.assetTypeId(string2Uuid(REPORT_ASSET_TYPE_ID))
+		.build()
+def findDataSetChildrenAssetTypesRequests = FindSubAssetTypesRequest.builder()
+		.includeParent(true)
+		.assetTypeId(string2Uuid(DATA_SET_ASSET_TYPE_ID))
+		.build()
+
+def reportChildrenTypes = assetTypeApi.findSubTypes(findReportsChildrenAssetTypesRequest).collect { it.getId() }
+def dataSetChildrenTypes = assetTypeApi.findSubTypes(findDataSetChildrenAssetTypesRequests).collect { it.getId() }
+
+relations.each {
+	def source = it.getSource()
+	def sourceAssetTypeId = assetApi.getAsset(source.id).getType().getId()
+
+	if (sourceAssetTypeId in dataSetChildrenTypes) {
+		dataSets.add(source.getId())
+	} else if (sourceAssetTypeId in reportChildrenTypes) {
+		reports.add(source.getId());
+	} else {
+		throw new WorkflowException(translation.getMessage("dataBasketUnsupportedAssetType", sourceAssetTypeId))
+	}
+}
+
+execution.setVariable("dataSetsAssetsList", dataSets)
+execution.setVariable("reportsAssetList", reports)
+execution.setVariable("containsDataSets", dataSets.size() > 0)
+execution.setVariable("containsReports", reports.size() > 0)
+execution.setVariable("dataSetsAccessGranted", dataSets.size() == 0)
+loggerApi.info("After Requester===========>??")]]></script>
+    </scriptTask>
+    <scriptTask id="findReportApprovers" name="Find approvers" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.core.api.dto.instance.responsibility.FindResponsibilitiesRequest
+                import com.collibra.dgc.core.api.model.ResourceType
+                USER_LIMIT=1000
+                Set reports = execution.getVariable("reportsAssetList")
+                Set approversList = []
+                OWNER_ROLE_ID ='00000000-0000-0000-0000-000000005040'
+                reports.each { reportId ->
+                def responsibilities = responsibilityApi.findResponsibilities(FindResponsibilitiesRequest.builder()
+                .roleIds([string2Uuid(OWNER_ROLE_ID)])
+                .resourceIds([reportId])
+                .limit(Integer.MAX_VALUE)
+                .build()).getResults()
+                def users = getUsersFromResponsibilities(responsibilities, USER_LIMIT)
+                //def users = responsibilities.collectMany {responsibilityApi.getUsers(it.id)}
+                approversList.add(users.collect { user -> "user(" + user.getUserName() + ")"}.join(","))
+                }
+
+                execution.setVariable("reportsApproverUserExpression", approversList.join(","))
+
+                def getUsersFromResponsibilities(responsibilities, limit) {
+                result = []
+                for (responsibility in responsibilities) {
+                result.addAll(getUsersFromResponsibility(responsibility, limit))
+                if (result.size >= limit) {
+                return result.take(limit)
+                }
+                }
+
+                return result
+                }
+
+                def getUsersFromResponsibility(responsibility, limit) {
+                if (ResourceType.User == responsibility.owner.resourceType) {
+                return [userApi.getUser(responsibility.owner.id)]
+                } else if (ResourceType.UserGroup == responsibility.owner.resourceType) {
+                return userApi.findUsers(FindUsersRequest.builder()
+                .groupId(responsibility.owner.id)
+                .limit(limit)
+                .build()).getResults()
+                }
+                return []
+                }
+            ]]></script>
+    </scriptTask>
+    <scriptTask id="consolidateApprovers" name="Consolidate approvers" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                def approverUserExpression = execution.getVariable("approverUserExpression")
+                def reportsApproverUserExpression = execution.getVariable("reportsApproverUserExpression")
+
+                Set userExpresionSet = []
+
+                if(approverUserExpression != null) {
+                userExpresionSet.add(approverUserExpression)
+                }
+
+                if(reportsApproverUserExpression != null) {
+                userExpresionSet.add(reportsApproverUserExpression)
+                }
+
+                execution.setVariable("approverUserExpression", userExpresionSet.join(","))
+            ]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow39" sourceRef="initDataUsageRequest" targetRef="assignRequesterRoleToDataUsage"></sequenceFlow>
+    <sequenceFlow id="flow42" sourceRef="validateDataElements" targetRef="exclusivegateway2"></sequenceFlow>
+    <scriptTask id="validateReports" name="Validate reports" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.core.api.dto.instance.responsibility.FindResponsibilitiesRequest
+                import com.collibra.dgc.core.api.model.ResourceType
+                Set reports = execution.getVariable("reportsAssetList")
+
+                def reportOwnersChecks = []
+                OWNER_ROLE_ID ='00000000-0000-0000-0000-000000005040'
+                reports.each {
+                def responsibilities = responsibilityApi.findResponsibilities(FindResponsibilitiesRequest.builder()
+                .roleIds([string2Uuid(OWNER_ROLE_ID)])
+                .resourceIds([it])
+                .limit(Integer.MAX_VALUE)
+                .build()).getResults();
+
+                def owners = responsibilities.collect {getUserFromResponsibility(it)}.findAll()
+                reportOwnersChecks << owners.asBoolean()
+                }
+
+                execution.setVariable("validReports", reportOwnersChecks.every { it == true })
+
+                def getUserFromResponsibility(responsibility) {
+                if (ResourceType.User == responsibility.owner.resourceType) {
+                return userApi.getUser(responsibility.owner.id)
+                } else if (ResourceType.UserGroup == responsibility.owner.resourceType) {
+                return userApi.findUsers(FindUsersRequest.builder()
+                .groupId(responsibility.owner.id)
+                .limit(1)
+                .build()).getResults()
+                .find()
+
+                }
+                return null
+                }
+            ]]></script>
+    </scriptTask>
+    <endEvent id="terminateendevent1" name="TerminateEndEvent">
+      <terminateEventDefinition></terminateEventDefinition>
+    </endEvent>
+    <sequenceFlow id="flow44" sourceRef="handleInvalidDataElement" targetRef="terminateendevent1"></sequenceFlow>
+    <sequenceFlow id="flow45" sourceRef="identifyReportsAndDataSets" targetRef="inclusivegateway1"></sequenceFlow>
+    <sequenceFlow id="flow46" name="data sets" sourceRef="inclusivegateway1" targetRef="validateDataElements">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${containsDataSets}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow47" name="reports" sourceRef="inclusivegateway1" targetRef="validateReports">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${containsReports}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow48" sourceRef="servicetask1" targetRef="inclusivegateway2"></sequenceFlow>
+    <sequenceFlow id="flow49" sourceRef="findReportApprovers" targetRef="inclusivegateway2"></sequenceFlow>
+    <exclusiveGateway id="exclusivegateway5" name="Exclusive Gateway"></exclusiveGateway>
+    <sequenceFlow id="flow51" sourceRef="validateReports" targetRef="exclusivegateway5"></sequenceFlow>
+    <sequenceFlow id="flow52" name="valid" sourceRef="exclusivegateway5" targetRef="findReportApprovers">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${validReports}]]></conditionExpression>
+    </sequenceFlow>
+    <scriptTask id="handleInvalidReports" name="HandleInvalidReports" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                throw new com.collibra.dgc.workflow.api.exception.WorkflowException(translation.getMessage('workflowNoOwner'))]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow53" sourceRef="inclusivegateway2" targetRef="consolidateApprovers"></sequenceFlow>
+    <sequenceFlow id="flow54" name="invalid" sourceRef="exclusivegateway5" targetRef="handleInvalidReports">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${!validReports}]]></conditionExpression>
+    </sequenceFlow>
+    <endEvent id="terminateendevent2" name="TerminateEndEvent">
+      <terminateEventDefinition></terminateEventDefinition>
+    </endEvent>
+    <sequenceFlow id="flow55" sourceRef="handleInvalidReports" targetRef="terminateendevent2"></sequenceFlow>
+    <inclusiveGateway id="inclusivegateway1" name="Parallel Gateway"></inclusiveGateway>
+    <inclusiveGateway id="inclusivegateway2" name="Parallel Gateway"></inclusiveGateway>
+    <scriptTask id="markAsApprovalPending" name="Mark as approval pending" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+                import com.collibra.dgc.core.api.dto.instance.asset.ChangeAssetRequest
+
+                PENDING_STATUS_ID = string2Uuid("00000000-0000-0000-0000-000000005023")
+
+                def changedAsset = assetApi.changeAsset(ChangeAssetRequest.builder()
+                .id(item.id)
+                .statusId(PENDING_STATUS_ID)
+                .build())
+            ]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow64" sourceRef="consolidateApprovers" targetRef="markAsApprovalPending"></sequenceFlow>
+    <sequenceFlow id="flow65" sourceRef="markAsApprovalPending" targetRef="callactivity1"></sequenceFlow>
+    <scriptTask id="servicetask11" name="Mark as access granted" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+
+
+import com.collibra.dgc.core.api.dto.instance.asset.ChangeAssetRequest
+
+ACCESS_GRANTED_STATUS_ID = string2Uuid("00000000-0000-0000-0000-000000005025")
+
+def changedAsset = assetApi.changeAsset(ChangeAssetRequest.builder()
+.id(item.id)
+.statusId(ACCESS_GRANTED_STATUS_ID)
+.build())
+]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow56" sourceRef="servicetask11" targetRef="usertask1"></sequenceFlow>
+    <scriptTask id="scripttask12" name="Finding the community of the dataset" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <documentation>Find data set relation from data usage and Get Community Id from data set.
+Check whether checkout is triggered from Apache ranger or API Governance Community or non of these two communities.</documentation>
+      <script><![CDATA[
+
+
+import com.collibra.dgc.core.api.component.instance.AssetApi
+import com.collibra.dgc.core.api.component.instance.DomainApi
+import com.collibra.dgc.core.api.dto.instance.relation.FindRelationsRequest
+loggerApi.info("Custom Flow of Checkout || Finding the community of the dataset starts")
+
+def accessControlGovFound = false
+def apiGovFound = false
+def gcpDataSetFound = false
+def mlDataSetFound = false
+def dataSetRelationId
+def urgencyValuesMap = [:]
+def impactValuesMap = [:]
+def dataElement
+/*** Find data set relation from data usage ***/
+def dataSetRelation = relationApi.findRelations(FindRelationsRequest.builder()
+		.relationTypeId(string2Uuid(assetRequiresOrIsEssentialForDataUsageRelTypeI))
+		.targetId(item.id)
+		.build()
+		).getResults()
+if(!dataSetRelation.isEmpty()) {
+	dataSetRelationId = dataSetRelation.get(0).getSource().getId()
+}
+loggerApi.info("dataSetRelationId--"+dataSetRelationId)
+def currentdataSetId = assetApi.getAsset(dataSetRelationId).getId()
+loggerApi.info("currentdataSetId--"+currentdataSetId)
+
+def findRelationdatasetToColumn =findRelations(currentdataSetId,string2Uuid(datsetcontainsDataElements),null)
+loggerApi.info("findRelationdatasetToColumn==>"+findRelationdatasetToColumn)
+
+if(!findRelationdatasetToColumn.isEmpty()) {
+for(eachcolumn in findRelationdatasetToColumn) {
+loggerApi.info("eachcolumn===>"+eachcolumn)
+dataElement = eachcolumn.getTarget().getName()
+
+loggerApi.info("dataElement===>"+dataElement)
+
+}
+}
+/*** Get Community Id from data set domain ***/
+def currentAssetDomainId = assetApi.getAsset(dataSetRelationId).getDomain().getId()
+def currentAssetCommunityId = domainApi.getDomain(currentAssetDomainId).getCommunity().getId()
+loggerApi.info("currentAssetCommunityId==>"+currentAssetCommunityId)
+
+/*** Check whether checkout is triggered from Apache ranger or API Governance Community or non of these two communities ***/
+
+if(currentAssetCommunityId == string2Uuid(dataCatalogCommunityId)) {
+	accessControlGovFound = true
+}else if(currentAssetCommunityId == string2Uuid(apiGovernanceCommunityId)) {
+	apiGovFound = true
+}else if(currentAssetCommunityId == string2Uuid(gcpCommunityId)){
+	gcpDataSetFound = true
+}else if(currentAssetCommunityId == string2Uuid(mlDataSetCommunityId)){
+	mlDataSetFound = true
+	loggerApi.info("mlDataSetFound---"+mlDataSetFound)
+}
+else {
+	loggerApi.info("Custom Flow of Checkout || Finding the community of the dataset || Data Set is not from Apache ranger or API Governnace Community")
+}
+
+
+
+/*
+ * //Get urgency attribute allowed values def urgencyAllowedValues =
+ * getAttributeAllowedValuesByAttributeTypeId(string2Uuid(urgencyAttrTypeId))
+ * if(!urgencyAllowedValues.isEmpty()) { urgencyAllowedValues.each{
+ * urgencyValuesMap[it] = it } }
+ *
+ * //Get impact attribute allowed values def impactAllowedValues =
+ * getAttributeAllowedValuesByAttributeTypeId(string2Uuid(impactAttrTypeId))
+ * if(!impactAllowedValues.isEmpty()) { impactAllowedValues.each{
+ * impactValuesMap[it] = it } }
+ */
+execution.setVariable("currentdataSetId",currentdataSetId)
+execution.setVariable("dataElement",dataElement)
+
+//execution.setVariable("urgencyValuesMap",urgencyValuesMap)
+//execution.setVariable("impactValuesMap",impactValuesMap)
+execution.setVariable("accessControlGovFound",accessControlGovFound)
+execution.setVariable("apiGovFound",apiGovFound)
+execution.setVariable("gcpDataSetFound",gcpDataSetFound)
+execution.setVariable("mlDataSetFound",mlDataSetFound)
+execution.setVariable("currentDataSetAssetId",dataSetRelationId)
+
+loggerApi.info("Custom Flow of Checkout || Finding the community of the dataset ends")]]></script>
+    </scriptTask>
+    <exclusiveGateway id="exclusivegateway8" name="Exclusive Gateway"></exclusiveGateway>
+    <sequenceFlow id="flow77" sourceRef="scripttask12" targetRef="exclusivegateway8"></sequenceFlow>
+    <scriptTask id="scripttask13" name="Trigger ACG/API/GCP custom checkout flows" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <documentation>Trigger ACG/API custom checkout flows</documentation>
+      <script><![CDATA[import com.collibra.dgc.core.api.dto.instance.relation.FindRelationsRequest
+import com.collibra.dgc.core.api.dto.workflow.StartWorkflowInstancesRequest
+import com.collibra.dgc.core.api.model.workflow.WorkflowBusinessItemType
+import com.collibra.dgc.core.api.dto.instance.responsibility.AddResponsibilityRequest
+import com.collibra.dgc.core.api.dto.instance.responsibility.FindResponsibilitiesRequest
+
+loggerApi.info("Custom Flow of Checkout || Triggering custom checkout from OOTB checkout starts")
+
+/*** Reusable Code Starts ***/
+def getWorkflowUUIDByProcessId(processId) {
+	def result = workflowDefinitionApi.getWorkflowDefinitionByProcessId(processId)
+	return result.getId()
+}
+
+def startWorkflowInstance(workflowDefinitionId, businessItemIds, businessItemType, formProperties) {
+	workflowInstanceApi.startWorkflowInstances(StartWorkflowInstancesRequest.builder()
+			.workflowDefinitionId(workflowDefinitionId)
+			.businessItemIds(businessItemIds)
+			.businessItemType(businessItemType)
+			.formProperties(formProperties)
+			.build()
+			)
+}/*** Reusable Code Ends ***/
+
+/*** Trigger related custom checkout based on community and passing form values ***/
+def checkoutWorkDefId = ""
+def formValuesMap = [:]
+formValuesMap["usageRequestReason"] = usageRequestReason
+formValuesMap["startTime"] = startTime
+formValuesMap["endTime"] = endTime
+formValuesMap["currentDataSetAssetId"] = currentDataSetAssetId
+
+if(accessControlGovFound) {
+	checkoutWorkDefId = getWorkflowUUIDByProcessId(acgCheckoutProcessId)
+}else if(mlDataSetFound){
+	checkoutWorkDefId = getWorkflowUUIDByProcessId(mlCheckoutProcessId)
+}
+else {
+	checkoutWorkDefId = getWorkflowUUIDByProcessId(gcpCheckoutProcessId)
+}
+
+startWorkflowInstance(checkoutWorkDefId, [item.id], WorkflowBusinessItemType.ASSET, formValuesMap)
+loggerApi.info("Custom Flow of Checkout || Triggering custom checkout from OOTB checkout ends")]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow78" name="ACG/API/GCP" sourceRef="exclusivegateway8" targetRef="scripttask13">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${(!iAcceptDSA.isEmpty() && accessControlGovFound) || gcpDataSetFound || mlDataSetFound}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow79" name="Not from ACG/API/GCP" sourceRef="exclusivegateway8" targetRef="generateDataUsageName">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${!accessControlGovFound && !gcpDataSetFound && !mlDataSetFound}]]></conditionExpression>
+    </sequenceFlow>
+    <endEvent id="endevent6" name="End"></endEvent>
+    <sequenceFlow id="flow80" sourceRef="scripttask13" targetRef="endevent6"></sequenceFlow>
+    <startEvent id="startevent1" name="Start" activiti:initiator="requester" activiti:formKey="create_data_set_usage_request">
+      <extensionElements>
+        <activiti:formProperty id="sendVotingActionEmails" name="Send an action email to users that are required to approve data usage" type="boolean" default="true" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="voteWarningTimeDuration" name="Please enter time duration before a voting reminder is send" type="string" default="B5D" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="voteTimeoutDuration" name="Timeout before voting process is forced to continue" type="string" default="P1M" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="voteCompletionPercentage" name="Percentage required to vote before completion" type="long" default="100" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="dataUsageName" name="Please give your data usage request a name" type="string" default="data usage name" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="usageRequestReason" name="Why do you need access to this data? *" type="textarea" required="true"></activiti:formProperty>
+        <activiti:formProperty id="startTime" name="I need this data by... *" type="datetime" required="true"></activiti:formProperty>
+        <activiti:formProperty id="endTime" name="and will use it until... *" type="datetime" required="true"></activiti:formProperty>
+        <activiti:formProperty id="iAcceptDSA" type="checkbox">
+          <activiti:value id="iAffirm" name="I affirm"></activiti:value>
+        </activiti:formProperty>
+        <activiti:formProperty id="dataUsagePurposeRelationTypeUuid" name="Data Usage Purpose Relation Type UUID" type="string" default="c0e00000-0000-0000-0000-000000007434" readable="false"></activiti:formProperty>
+        <activiti:formProperty id="acgCheckoutProcessId" name="acgCheckoutProcessId" type="string" default="customCheckoutACG" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="apiCheckoutProcessId" name="apiCheckoutProcessId" type="string" default="apiCustomCheckout" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="assetRequiresOrIsEssentialForDataUsageRelTypeI" name="assetRequiresOrIsEssentialForDataUsageRelTypeI" type="string" default="00000000-0000-0000-0000-000000007061" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="dataCatalogCommunityId" name="dataCatalogCommunityId" type="string" default="ddf6ef0b-7dd6-41fd-8e5d-976418f213d7" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="apiGovernanceCommunityId" name="apiGovernanceCommunityId" type="string" default="23bc7971-67bb-4330-864c-162d45c8cfa1" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="gcpCommunityId" name="gcpCommunityId" type="string" default="2eceedb1-f590-4a55-b311-1c4762a02f51" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="gcpCheckoutProcessId" name="gcpCheckoutProcessId" type="string" default="customCheckoutGCP" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="mlCheckoutProcessId" name="mlCheckoutProcessId" type="string" default="mLCustomCheckout" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="mlDataSetCommunityId" name="mlDataSetCommunityId" type="string" default="aa65ffcd-a42c-4466-a804-3c42a25c845e" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="servicenowDefinitionId" name="servicenowDefinitionId" type="string" default="serviceNowIntegration" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="requesterRoleId" name="requesterRoleId" type="string" default="00000000-0000-0000-0000-000000005033" readable="false" required="true"></activiti:formProperty>
+        <activiti:formProperty id="datsetcontainsDataElements" name="datsetcontainsDataElements" type="string" default="00000000-0000-0000-0000-000000007062" readable="false" required="true"></activiti:formProperty>
+      </extensionElements>
+    </startEvent>
+    <sequenceFlow id="flow1" sourceRef="startevent1" targetRef="scripttask12"></sequenceFlow>
+    <sequenceFlow id="flow81" sourceRef="exclusivegateway8" targetRef="endevent6">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${(iAcceptDSA.isEmpty() && accessControlGovFound)}]]></conditionExpression>
+    </sequenceFlow>
+    <scriptTask id="scripttask14" name="Script Task" scriptFormat="groovy" activiti:autoStoreVariables="false">
+      <script><![CDATA[
+
+
+
+import com.collibra.dgc.core.api.component.workflow.WorkflowInstanceApi
+import com.collibra.dgc.core.api.dto.instance.responsibility.FindResponsibilitiesRequest
+import com.collibra.dgc.core.api.dto.workflow.StartWorkflowInstancesRequest
+import com.collibra.dgc.core.api.model.ResourceType
+import com.collibra.dgc.core.api.model.workflow.WorkflowBusinessItemType
+
+loggerApi.info("select===========")
+def requesterMail
+def requesterName
+def ownerId
+def requesterResponsibilities = responsibilityApi.findResponsibilities(FindResponsibilitiesRequest.builder()
+	.resourceIds([item.id])
+	.roleIds([string2Uuid(requesterRoleId)])
+	.build()
+	).getResults()
+if(!requesterResponsibilities.isEmpty()) {
+for(eachUser in requesterResponsibilities) {
+	 requesterMail = (userApi.getUser(eachUser.getOwner().getId()).getEmailAddress())
+	 ownerId= eachUser.getOwner().getId()
+		 
+}
+}
+requesterName = userApi.getUser(ownerId).getUserName()
+loggerApi.info("requester=========>"+requester)
+loggerApi.info("ownerId=========>"+ownerId)
+
+loggerApi.info("requesterName=========>"+requesterName)
+loggerApi.info("requester mail is ============>"+requesterMail)
+def getWorkflowUUIDByProcessId(processId) {
+	def result = workflowDefinitionApi.getWorkflowDefinitionByProcessId(processId)
+	return result.getId()
+	}
+def startWorkflowInstance(workflowDefinitionId,businessItemIds,businessItemType,formProperties) {
+	return workflowInstanceApi.startWorkflowInstances(StartWorkflowInstancesRequest.builder()
+			.workflowDefinitionId(workflowDefinitionId)
+			.businessItemIds(businessItemIds)
+			.businessItemType(businessItemType)
+			.formProperties(formProperties)
+			.build()
+			)
+}
+// trigging Rest api workflow
+def formValuesMap=[:]
+formValuesMap['dataUsageId']=item.id
+formValuesMap['requesterMail']=requesterMail
+formValuesMap['approverUserExpression']=approverUserExpression
+formValuesMap['requesterName']=requesterName
+formValuesMap['dataElement']=dataElement
+
+
+def publishworkflowdefId=getWorkflowUUIDByProcessId(servicenowDefinitionId)
+startWorkflowInstance(publishworkflowdefId,[item.id],WorkflowBusinessItemType.ASSET,formValuesMap)
+loggerApi.info("selection flow end==>")
+
+execution.setVariable("requesterMail",requesterMail)
+loggerApi.info("requesterMail======>"+requesterMail)
+execution.setVariable("approverUserExpression",approverUserExpression)
+
+
+
+
+]]></script>
+    </scriptTask>
+    <sequenceFlow id="flow82" sourceRef="scripttask14" targetRef="servicetask4"></sequenceFlow>
+    <sequenceFlow id="flow83" sourceRef="assignRequesterRoleToDataUsage" targetRef="identifyReportsAndDataSets"></sequenceFlow>
+    <userTask id="usertask1" name="Data Usage is Approved" activiti:candidateUsers="${approverUserExpression}"></userTask>
+    <sequenceFlow id="flow84" sourceRef="usertask1" targetRef="scripttask14"></sequenceFlow>
+  </process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Collaboration">
+    <bpmndi:BPMNPlane bpmnElement="Collaboration" id="BPMNPlane_Collaboration">
+      <bpmndi:BPMNShape bpmnElement="pool1" id="BPMNShape_pool1">
+        <omgdc:Bounds height="634.0" width="2170.0" x="63.0" y="0.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="lane1" id="BPMNShape_lane1">
+        <omgdc:Bounds height="426.0" width="2150.0" x="83.0" y="0.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="lane2" id="BPMNShape_lane2">
+        <omgdc:Bounds height="206.0" width="2150.0" x="83.0" y="425.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="endevent1" id="BPMNShape_endevent1">
+        <omgdc:Bounds height="35.0" width="35.0" x="2180.0" y="225.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="servicetask1" id="BPMNShape_servicetask1">
+        <omgdc:Bounds height="55.0" width="121.0" x="1362.0" y="20.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="callactivity1" id="BPMNShape_callactivity1">
+        <omgdc:Bounds height="64.0" width="105.0" x="1261.0" y="451.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="exclusivegateway1" id="BPMNShape_exclusivegateway1">
+        <omgdc:Bounds height="40.0" width="40.0" x="1445.0" y="462.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="servicetask4" id="BPMNShape_servicetask4">
+        <omgdc:Bounds height="55.0" width="105.0" x="2060.0" y="215.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="initDataUsageRequest" id="BPMNShape_initDataUsageRequest">
+        <omgdc:Bounds height="71.0" width="105.0" x="302.0" y="120.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="validateDataElements" id="BPMNShape_validateDataElements">
+        <omgdc:Bounds height="65.0" width="105.0" x="892.0" y="15.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="exclusivegateway2" id="BPMNShape_exclusivegateway2">
+        <omgdc:Bounds height="40.0" width="40.0" x="1095.0" y="27.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="handleInvalidDataElement" id="BPMNShape_handleInvalidDataElement">
+        <omgdc:Bounds height="55.0" width="105.0" x="1063.0" y="115.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="endevent3" id="BPMNShape_endevent3">
+        <omgdc:Bounds height="35.0" width="35.0" x="1663.0" y="27.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="servicetask9" id="BPMNShape_servicetask9">
+        <omgdc:Bounds height="60.0" width="105.0" x="1503.0" y="15.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="servicetask10" id="BPMNShape_servicetask10">
+        <omgdc:Bounds height="55.0" width="105.0" x="1503.0" y="118.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="generateDataUsageName" id="BPMNShape_generateDataUsageName">
+        <omgdc:Bounds height="60.0" width="105.0" x="160.0" y="126.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="assignRequesterRoleToDataUsage" id="BPMNShape_assignRequesterRoleToDataUsage">
+        <omgdc:Bounds height="63.0" width="105.0" x="452.0" y="124.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="identifyReportsAndDataSets" id="BPMNShape_identifyReportsAndDataSets">
+        <omgdc:Bounds height="63.0" width="105.0" x="592.0" y="124.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="findReportApprovers" id="BPMNShape_findReportApprovers">
+        <omgdc:Bounds height="55.0" width="105.0" x="1236.0" y="203.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="consolidateApprovers" id="BPMNShape_consolidateApprovers">
+        <omgdc:Bounds height="58.0" width="105.0" x="1370.0" y="269.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="validateReports" id="BPMNShape_validateReports">
+        <omgdc:Bounds height="55.0" width="105.0" x="892.0" y="203.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="terminateendevent1" id="BPMNShape_terminateendevent1">
+        <omgdc:Bounds height="35.0" width="35.0" x="1202.0" y="125.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="exclusivegateway5" id="BPMNShape_exclusivegateway5">
+        <omgdc:Bounds height="40.0" width="40.0" x="1095.0" y="210.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="handleInvalidReports" id="BPMNShape_handleInvalidReports">
+        <omgdc:Bounds height="55.0" width="120.0" x="1056.0" y="294.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="terminateendevent2" id="BPMNShape_terminateendevent2">
+        <omgdc:Bounds height="35.0" width="35.0" x="1212.0" y="304.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="inclusivegateway1" id="BPMNShape_inclusivegateway1">
+        <omgdc:Bounds height="40.0" width="40.0" x="762.0" y="135.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="inclusivegateway2" id="BPMNShape_inclusivegateway2">
+        <omgdc:Bounds height="40.0" width="40.0" x="1402.0" y="210.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="markAsApprovalPending" id="BPMNShape_markAsApprovalPending">
+        <omgdc:Bounds height="61.0" width="105.0" x="1370.0" y="348.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="servicetask11" id="BPMNShape_servicetask11">
+        <omgdc:Bounds height="65.0" width="105.0" x="1651.0" y="210.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask12" id="BPMNShape_scripttask12">
+        <omgdc:Bounds height="69.0" width="140.0" x="112.0" y="23.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="exclusivegateway8" id="BPMNShape_exclusivegateway8">
+        <omgdc:Bounds height="40.0" width="40.0" x="292.0" y="37.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask13" id="BPMNShape_scripttask13">
+        <omgdc:Bounds height="70.0" width="121.0" x="420.0" y="23.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="endevent6" id="BPMNShape_endevent6">
+        <omgdc:Bounds height="35.0" width="35.0" x="582.0" y="40.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="startevent1" id="BPMNShape_startevent1">
+        <omgdc:Bounds height="35.0" width="35.0" x="112.0" y="138.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="scripttask14" id="BPMNShape_scripttask14">
+        <omgdc:Bounds height="55.0" width="105.0" x="1930.0" y="215.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape bpmnElement="usertask1" id="BPMNShape_usertask1">
+        <omgdc:Bounds height="55.0" width="105.0" x="1801.0" y="215.0"></omgdc:Bounds>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge bpmnElement="flow3" id="BPMNEdge_flow3">
+        <omgdi:waypoint x="1366.0" y="483.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1445.0" y="482.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow5" id="BPMNEdge_flow5">
+        <omgdi:waypoint x="1485.0" y="482.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1555.0" y="481.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1555.0" y="173.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="39.0" x="1535.0" y="430.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow6" id="BPMNEdge_flow6">
+        <omgdi:waypoint x="1485.0" y="482.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1702.0" y="481.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1703.0" y="275.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="45.0" x="1690.0" y="481.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow9" id="BPMNEdge_flow9">
+        <omgdi:waypoint x="2165.0" y="242.0"></omgdi:waypoint>
+        <omgdi:waypoint x="2180.0" y="242.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow12" id="BPMNEdge_flow12">
+        <omgdi:waypoint x="1135.0" y="47.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1362.0" y="47.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="22.0" x="1107.0" y="55.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow13" id="BPMNEdge_flow13">
+        <omgdi:waypoint x="1115.0" y="67.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1115.0" y="115.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="30.0" x="1030.0" y="80.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow15" id="BPMNEdge_flow15">
+        <omgdi:waypoint x="1608.0" y="45.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1663.0" y="44.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow17" id="BPMNEdge_flow17">
+        <omgdi:waypoint x="1555.0" y="118.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1555.0" y="75.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow23" id="BPMNEdge_flow23">
+        <omgdi:waypoint x="265.0" y="156.0"></omgdi:waypoint>
+        <omgdi:waypoint x="302.0" y="155.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow39" id="BPMNEdge_flow39">
+        <omgdi:waypoint x="407.0" y="155.0"></omgdi:waypoint>
+        <omgdi:waypoint x="452.0" y="155.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow42" id="BPMNEdge_flow42">
+        <omgdi:waypoint x="997.0" y="47.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1095.0" y="47.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow44" id="BPMNEdge_flow44">
+        <omgdi:waypoint x="1168.0" y="142.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1202.0" y="142.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow45" id="BPMNEdge_flow45">
+        <omgdi:waypoint x="697.0" y="155.0"></omgdi:waypoint>
+        <omgdi:waypoint x="762.0" y="155.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow46" id="BPMNEdge_flow46">
+        <omgdi:waypoint x="782.0" y="135.0"></omgdi:waypoint>
+        <omgdi:waypoint x="782.0" y="47.0"></omgdi:waypoint>
+        <omgdi:waypoint x="892.0" y="47.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="45.0" x="740.0" y="35.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow47" id="BPMNEdge_flow47">
+        <omgdi:waypoint x="782.0" y="175.0"></omgdi:waypoint>
+        <omgdi:waypoint x="782.0" y="230.0"></omgdi:waypoint>
+        <omgdi:waypoint x="892.0" y="230.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="35.0" x="737.0" y="239.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow48" id="BPMNEdge_flow48">
+        <omgdi:waypoint x="1422.0" y="75.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1422.0" y="210.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow49" id="BPMNEdge_flow49">
+        <omgdi:waypoint x="1341.0" y="230.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1402.0" y="230.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow51" id="BPMNEdge_flow51">
+        <omgdi:waypoint x="997.0" y="230.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1095.0" y="230.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow52" id="BPMNEdge_flow52">
+        <omgdi:waypoint x="1135.0" y="230.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1236.0" y="230.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="22.0" x="1339.0" y="187.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow53" id="BPMNEdge_flow53">
+        <omgdi:waypoint x="1422.0" y="250.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1422.0" y="269.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow54" id="BPMNEdge_flow54">
+        <omgdi:waypoint x="1115.0" y="250.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1116.0" y="294.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="30.0" x="1163.0" y="280.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow55" id="BPMNEdge_flow55">
+        <omgdi:waypoint x="1176.0" y="321.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1212.0" y="321.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow64" id="BPMNEdge_flow64">
+        <omgdi:waypoint x="1422.0" y="327.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1422.0" y="348.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow65" id="BPMNEdge_flow65">
+        <omgdi:waypoint x="1370.0" y="378.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1315.0" y="379.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1313.0" y="451.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow56" id="BPMNEdge_flow56">
+        <omgdi:waypoint x="1756.0" y="242.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1801.0" y="242.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow77" id="BPMNEdge_flow77">
+        <omgdi:waypoint x="252.0" y="57.0"></omgdi:waypoint>
+        <omgdi:waypoint x="292.0" y="57.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow78" id="BPMNEdge_flow78">
+        <omgdi:waypoint x="332.0" y="57.0"></omgdi:waypoint>
+        <omgdi:waypoint x="420.0" y="58.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="16.0" width="85.0" x="321.0" y="23.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow79" id="BPMNEdge_flow79">
+        <omgdi:waypoint x="312.0" y="77.0"></omgdi:waypoint>
+        <omgdi:waypoint x="212.0" y="126.0"></omgdi:waypoint>
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds height="48.0" width="100.0" x="306.0" y="79.0"></omgdc:Bounds>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow80" id="BPMNEdge_flow80">
+        <omgdi:waypoint x="541.0" y="58.0"></omgdi:waypoint>
+        <omgdi:waypoint x="582.0" y="57.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow1" id="BPMNEdge_flow1">
+        <omgdi:waypoint x="129.0" y="138.0"></omgdi:waypoint>
+        <omgdi:waypoint x="182.0" y="92.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow81" id="BPMNEdge_flow81">
+        <omgdi:waypoint x="312.0" y="37.0"></omgdi:waypoint>
+        <omgdi:waypoint x="312.0" y="8.0"></omgdi:waypoint>
+        <omgdi:waypoint x="602.0" y="8.0"></omgdi:waypoint>
+        <omgdi:waypoint x="599.0" y="40.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow82" id="BPMNEdge_flow82">
+        <omgdi:waypoint x="2035.0" y="242.0"></omgdi:waypoint>
+        <omgdi:waypoint x="2060.0" y="242.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow83" id="BPMNEdge_flow83">
+        <omgdi:waypoint x="557.0" y="155.0"></omgdi:waypoint>
+        <omgdi:waypoint x="592.0" y="155.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge bpmnElement="flow84" id="BPMNEdge_flow84">
+        <omgdi:waypoint x="1906.0" y="242.0"></omgdi:waypoint>
+        <omgdi:waypoint x="1930.0" y="242.0"></omgdi:waypoint>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</definitions>

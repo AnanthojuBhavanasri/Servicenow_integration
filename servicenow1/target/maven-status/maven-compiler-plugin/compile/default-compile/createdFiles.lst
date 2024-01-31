@@ -1,0 +1,16 @@
+com\lorang\mif\collibra\utils\CollibraFactory.class
+com\lorang\mif\servicenow\application\ServicenowIndApplication.class
+com\lorang\mif\servicenow\constants\ServiceNowConstants.class
+com\lorang\mif\servicenow\models\IncidentDetails.class
+com\lorang\mif\servicenow\service\ServiceNowService.class
+com\lorang\mif\servicenow\exception\CollibraRestClientException.class
+com\lorang\mif\collibra\restclient\CollibraRest.class
+com\lorang\mif\servicenow\utils\ServicenowClientFactory.class
+META-INF\spring-configuration-metadata.json
+com\lorang\mif\servicenow\controller\ServiceNowController.class
+com\lorang\mif\servicenow\restclient\ServiceNowRestClient.class
+com\lorang\mif\servicenow\properties\CollibraProperties.class
+com\lorang\mif\servicenow\models\WorkFlowInstances.class
+com\lorang\mif\servicenow\exception\ServicenowException.class
+com\lorang\mif\servicenow\models\ServicenowFields.class
+com\lorang\mif\servicenow\properties\ServicenowProperties.class
